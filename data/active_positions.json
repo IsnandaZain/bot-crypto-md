@@ -1,0 +1,84 @@
+{
+  "positions": [
+    {
+      "symbol": "SOL/USDT:USDT",
+      "signal": "LONG",
+      "entry_price": 89.96,
+      "current_price": 92.51,
+      "stop_loss": 87.26,
+      "take_profit": 96.71,
+      "quantity": 0.444,
+      "leverage": 20,
+      "margin_required": 2.0,
+      "opened_at": "2026-03-24T22:44:13.772337",
+      "status": "OPEN",
+      "method": "Hybrid (S/R Support)",
+      "unrealized_pnl": 1.129800000000005,
+      "unrealized_pnl_pct": 56.49000000000025
+    },
+    {
+      "symbol": "XRP/USDT:USDT",
+      "signal": "LONG",
+      "entry_price": 1.42,
+      "current_price": 1.4184,
+      "stop_loss": 1.38,
+      "take_profit": 1.52,
+      "quantity": 28.149,
+      "leverage": 20,
+      "margin_required": 2.0,
+      "opened_at": "2026-03-25T07:38:52.491707",
+      "status": "OPEN",
+      "method": "Hybrid (S/R Support)",
+      "unrealized_pnl": -0.04743839999999504,
+      "unrealized_pnl_pct": -2.371919999999752
+    },
+    {
+      "symbol": "TAO/USDT:USDT",
+      "signal": "LONG",
+      "entry_price": 333.37,
+      "current_price": 352.24,
+      "stop_loss": 323.37,
+      "take_profit": 358.37,
+      "quantity": 0.12,
+      "leverage": 20,
+      "margin_required": 2.0,
+      "opened_at": "2026-03-25T10:07:04.248484",
+      "status": "OPEN",
+      "method": "Hybrid (S/R Support)",
+      "unrealized_pnl": 2.2620000000000005,
+      "unrealized_pnl_pct": 113.10000000000002
+    },
+    {
+      "symbol": "HYPE/USDT:USDT",
+      "signal": "LONG",
+      "entry_price": 39.86,
+      "current_price": 40.734,
+      "stop_loss": 38.66,
+      "take_profit": 42.86,
+      "quantity": 1.004,
+      "leverage": 20,
+      "margin_required": 2.0,
+      "opened_at": "2026-03-25T10:22:33.911380",
+      "status": "OPEN",
+      "method": "Hybrid (S/R Support)",
+      "unrealized_pnl": 0.8750960000000024,
+      "unrealized_pnl_pct": 43.754800000000124
+    }
+  ],
+  "history": [
+    {
+      "symbol": "TAO/USDT:USDT",
+      "signal": "LONG",
+      "entry_price": 307.77,
+      "exit_price": 330.84,
+      "quantity": 0.13,
+      "pnl_usdt": 2.9966999999999993,
+      "pnl_pct": 149.83499999999995,
+      "opened_at": "2026-03-24T22:44:14.888890",
+      "closed_at": "2026-03-25T08:10:53.109258",
+      "exit_reason": "TP_HIT",
+      "method": "Hybrid (S/R Support)"
+    }
+  ],
+  "last_updated": "2026-03-25T17:24:06.090279"
+}

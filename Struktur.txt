@@ -1,0 +1,22 @@
+tao_bot/
+│
+├── config.py                 # Update: WATCHLIST & TIMEFRAMES
+├── main.py                   # Update: Looping scan koin
+│
+├── core/
+│   ├── exchange.py
+│   └── data_fetcher.py       # Update: Support fetch multi-TF
+│
+├── indicators/
+│   └── technical.py          # Update: Support dict of DataFrames
+│
+├── strategy/
+│   ├── signal_engine.py      # Update: Logic per TF
+│   └── mtf_confluence.py     # NEW: Otak pengambil keputusan MTF
+│
+├── risk/
+│   └── manager.py
+│
+└── utils/
+    ├── logger.py             # Update: Tampilan tabel multi-coin
+    └── helpers.py            # NEW: Fungsi bantuan

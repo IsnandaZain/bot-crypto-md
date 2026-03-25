@@ -1,0 +1,23 @@
+LONG
+✅ EMA 50 > EMA 200 (Trend utama bullish)
+✅ Harga > EMA 50 (Pullback selesai)
+✅ RSI > 50 tapi < 70 (Momentum positif, belum overbought)
+✅ MACD Histogram > 0 (Momentum konfirmasi)
+✅ ADX > 25 (Trend cukup kuat) ATAU ADX < 25 + BB Squeeze (Sideways breakout)
+✅ Volume > Average Volume 20 (Konfirmasi breakout)
+
+
+SHORT
+✅ EMA 50 < EMA 200 (Trend utama bearish)
+✅ Harga < EMA 50 (Pullback selesai)
+✅ RSI < 50 tapi > 30 (Momentum negatif, belum oversold)
+✅ MACD Histogram < 0 (Momentum konfirmasi)
+✅ ADX > 25 (Trend cukup kuat) ATAU ADX < 25 + BB Squeeze (Sideways breakout)
+✅ Volume > Average Volume 20 (Konfirmasi breakout)
+
+
+NO TRADE
+❌ EMA 50 & EMA 200 terlalu dekat (Trend tidak jelas)
+❌ RSI > 70 atau < 30 (Sudah overextended, tunggu pullback)
+❌ ADX < 20 + BB tidak squeeze (Market mati, tidak ada momentum)
+❌ Volume terlalu rendah (False breakout risk)
