@@ -110,22 +110,29 @@ class PositionTracker:
             current_price = current_prices[symbol]
             exit_price = None
             exit_reason = None
-            
-            # Cek SL
-            if pos['signal'] == 'LONG':
-                if current_price <= pos['stop_loss']:
-                    exit_price = pos['stop_loss']
-                    exit_reason = 'SL_HIT'
-                elif current_price >= pos['take_profit']:
-                    exit_price = pos['take_profit']
-                    exit_reason = 'TP_HIT'
-            else:  # SHORT
-                if current_price >= pos['stop_loss']:
-                    exit_price = pos['stop_loss']
-                    exit_reason = 'SL_HIT'
-                elif current_price <= pos['take_profit']:
-                    exit_price = pos['take_profit']
-                    exit_reason = 'TP_HIT'
+
+            # jika sudah diatas 105% auto TP saja
+            # print((pos['current_price'] - pos['entry_price']) / pos['entry_price'] * 100 * pos['leverage'])
+            if (pos['current_price'] - pos['entry_price']) / pos['entry_price'] * 100 * pos['leverage'] > 105:
+                exit_price = pos['current_price']
+                exit_reason = 'AUTO_TP_HIT'
+
+            else:
+                # Cek SL
+                if pos['signal'] == 'LONG':
+                    if current_price <= pos['stop_loss']:
+                        exit_price = pos['stop_loss']
+                        exit_reason = 'SL_HIT'
+                    elif current_price >= pos['take_profit']:
+                        exit_price = pos['take_profit']
+                        exit_reason = 'TP_HIT'
+                else:  # SHORT
+                    if current_price >= pos['stop_loss']:
+                        exit_price = pos['stop_loss']
+                        exit_reason = 'SL_HIT'
+                    elif current_price <= pos['take_profit']:
+                        exit_price = pos['take_profit']
+                        exit_reason = 'TP_HIT'
             
             # Jika exit, hitung PnL dan tutup posisi
             if exit_price:
@@ -150,7 +157,7 @@ class PositionTracker:
                 self.positions.remove(pos)
                 
                 emoji = "🎯" if exit_reason == 'TP_HIT' else "🛑"
-                print(f"{emoji} Posisi ditutup: {pos['symbol']} - {exit_reason} - PnL: ${pnl:.2f}")
+                print(f"{emoji} Posisi ditutup: {pos['symbol']} - {exit_reason} - PnL: ${pnl:.6f}")
         
         # Save setelah update
         if closed_positions:

@@ -2,12 +2,18 @@
 import time
 from core.exchange import ExchangeManager
 from core.data_fetcher import DataFetcher
-from indicators.technical import IndicatorCalculator
-from strategy.mtf_confluence import MTFConfluence
+
 from risk.manager import RiskManager
 from risk.position_sizer import PositionSizer
 from risk.position_tracker import PositionTracker  # ⭐ IMPORT BARU
 from utils.logger import BotLogger
+
+from strategy.mtf_confluence import MTFConfluence
+from strategy.mtf_confluence_bb import MTFConfluenceBB
+
+from indicators.technical import IndicatorCalculator
+from indicators.technical_bb import IndicatorCalculatorBB
+
 from config import WATCHLIST, TRADING_CONFIG
 
 def scan_market():
@@ -85,28 +91,56 @@ def scan_market():
             
             # Fetch Multi-TF
             df_dict = fetcher.fetch_multi_timeframe(symbol)
+            df_dict_bb = df_dict.copy()
             if df_dict is None:
                 continue
             
             # Calculate Indicators
             ind_calc = IndicatorCalculator(df_dict)
             df_dict = ind_calc.calculate_all()
+
+            ind_calc_bb = IndicatorCalculatorBB(df_dict_bb)
+            df_dict_bb = ind_calc_bb.calculate_all()
+
+            # ⭐ Simpan df_dict ke file TXT untuk inspeksi data (Debug)
+            try:
+                safe_symbol = symbol.replace('/', '_').replace(':', '_')
+                debug_file = f"data/{safe_symbol}_debug.txt"
+                with open(debug_file, "w", encoding='utf-8') as f:
+                    for tf_key, df in df_dict.items():
+                        f.write(f"\n{'='*30} TIMEFRAME: {tf_key} {'='*30}\n")
+                        f.write(df.tail(20).to_string(float_format='%.6f')) # Pastikan desimal terlihat 6 angka
+                        f.write("\n")
+                print(f"📄 Data debug {symbol} disimpan ke {debug_file}")
+            except Exception as e:
+                print(f"⚠️ Gagal menyimpan file debug untuk {symbol}: {e}")
             
             # Analyze Confluence
-            mtf = MTFConfluence(df_dict)
+            mtf = MTFConfluence(df_dict, symbol)
             signal, reasons, score = mtf.analyze()
+            
+            # Analyze Confluence - BB
+            mtf_bb = MTFConfluenceBB(df_dict_bb, symbol)
+            signal_bb, reasons_bb, score_bb = mtf_bb.analyze()
 
             # add logger
             emoji = "🟢" if signal == "LONG" else "🔴" if signal == "SHORT" else "⚪"
             print(f"Result : {symbol} - {emoji} {signal} | Score : ({score})")
 
+            # add logger - bb
+            emoji_bb = "🟢" if signal_bb == "LONG" else "🔴" if signal_bb == "SHORT" else "⚪"
+            print(f"Result BB : {symbol} - {emoji_bb} {signal_bb} | Score : ({score_bb})")
+
+            # get risk data
             risk_data = mtf.get_risk_data()
+            risk_data_bb = mtf_bb.get_risk_data()
             
             # Calculate Risk Levels
             risk_levels = None
             position_info = None
             
             if signal != "NO TRADE":
+                # risk manager
                 rm = RiskManager(
                     atr=risk_data['atr'],
                     price=risk_data['price'],
@@ -115,6 +149,7 @@ def scan_market():
                 )
                 risk_levels = rm.calculate_levels()
                 
+                # position sizer
                 ps = PositionSizer(account_balance, TRADING_CONFIG['leverage'])
                 position_info = ps.calculate_position(
                     entry_price=risk_levels['entry'],
@@ -135,8 +170,42 @@ def scan_market():
                     'risk': risk_levels,
                     'position': position_info
                 })
+
+            if signal_bb != "NO TRADE":
+                # risk manager - bb
+                rm_bb = RiskManager(
+                    atr=risk_data_bb['atr'],
+                    price=risk_data_bb['price'],
+                    signal=signal_bb,
+                    df_base=risk_data_bb.get('df_base')
+                )
+                risk_levels_bb = rm_bb.calculate_levels()
+
+                # position sizer - bb
+                ps_bb = PositionSizer(account_balance, TRADING_CONFIG['leverage'])
+                position_info_bb = ps_bb.calculate_position(
+                    entry_price=risk_levels_bb['entry'],
+                    stop_loss_price=risk_levels_bb['stop_loss'],
+                    signal=signal_bb
+                )
+
+                # Tambahkan symbol ke position_info
+                position_info_bb['symbol'] = symbol
+                position_info_bb['method'] = risk_levels_bb['method']
+                
+                # Tambahkan ke tracker
+                tracker.add_position(position_info_bb)
+                new_signals.append({
+                    'symbol': symbol,
+                    'signal': signal_bb,
+                    'reasons': reasons_bb,
+                    'risk': risk_levels_bb,
+                    'position': position_info_bb
+                })
+
+
             
-            time.sleep(0.5)
+            time.sleep(1)
     else:
         print("⚠️ Slot posisi penuh. Tidak ada scan sinyal baru.")
     
@@ -152,8 +221,8 @@ if __name__ == "__main__":
     while True:
         try:
             scan_market()
-            print("\n⏳ Menunggu 120 detik sebelum scan berikutnya...")
-            time.sleep(120)
+            print("\n⏳ Menunggu 100 detik sebelum scan berikutnya...")
+            time.sleep(100)
         except KeyboardInterrupt:
             print("\n🛑 Bot dihentikan oleh user")
             break

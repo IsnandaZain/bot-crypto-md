@@ -16,18 +16,14 @@ WATCHLIST = [
     'ASTER/USDT:USDT',
     'DOGE/USDT:USDT',
     'PENDLE/USDT:USDT',
-    'FARTCOIN/USDT:USDT',
+    'FARTCOIN/USDT:USDT',   
     'PENGU/USDT:USDT',
     'ARB/USDT:USDT',
     'NEAR/USDT:USDT'
 ]
 
-"""
-'TAO/USDT:USDT',
-'SUI/USDT:USDT',
-'SOL/USDT:USDT',
-'FARTCOIN/USDT:USDT',
-'DOGE/USDT:USDT'
+""" 
+ 
 """
 
 # KONFIGURASI MULTI-TIMEFRAME
@@ -42,11 +38,11 @@ TRADING_CONFIG = {
     'max_position_size_pct': 4,
 
     # ⭐ ACCOUNT SETTINGS (Untuk Position Sizing)
-    'account_balance_usdt': 50,  # ⚠️ ISI DENGAN BALANCE ANDA (Manual/Paper)
+    'account_balance_usdt': 56,  # ⚠️ ISI DENGAN BALANCE ANDA (Manual/Paper)
     'auto_fetch_balance': False,   # True jika mau ambil dari API (butuh API Key)
 
     # ⭐ MAX SIMULTANEOUS POSITIONS (BARU)
-    'max_open_positions': 5,  # Maksimal 3 posisi terbuka bersamaan
+    'max_open_positions': 8,  # Maksimal 3 posisi terbuka bersamaan
 }
 
 # ⭐ ORDER EXECUTION SETTINGS (BARU)
@@ -76,6 +72,18 @@ INDICATOR_CONFIG = {
     'macd_fast': 12,
     'macd_slow': 26,
     'macd_signal': 9,
+    'atr_period': 14,
+    'adx_period': 14
+}
+
+INDICATOR_CONFIG_BB = {
+    'bb_period': 20,
+    'bb_std': 2.0,
+    'rsi_period': 14,
+    'macd_fast': 12,
+    'macd_slow': 26,
+    'macd_signal': 9,
+    'vol_ma_period': 20,
     'atr_period': 14,
     'adx_period': 14
 }

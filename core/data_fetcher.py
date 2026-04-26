@@ -13,7 +13,7 @@ class DataFetcher:
             df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
             numeric_cols = ['open', 'high', 'low', 'close', 'volume']
-            df[numeric_cols] = df[numeric_cols].astype(float)
+            df[numeric_cols] = df[numeric_cols].astype('float64')
             return df
         except Exception as e:
             print(f"❌ Error fetch {symbol} {timeframe}: {e}")

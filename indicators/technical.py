@@ -39,3 +39,5 @@ class IndicatorCalculator:
     
     def get_dataframes(self):
         return self.df_dict
+    
+

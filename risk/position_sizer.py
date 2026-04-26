@@ -47,10 +47,10 @@ class PositionSizer:
         # 6. Sesuaikan dengan Precision Exchange (Bybit TAOUSDT)
         # TAO biasanya 3 desimal untuk quantity, 2 desimal untuk price
         quantity = self._round_to_precision(quantity, 3)  # 3 desimal
-        entry_price = self._round_to_precision(entry_price, 2)
-        stop_loss_price = self._round_to_precision(stop_loss_price, 2)
+        entry_price = self._round_to_precision(entry_price, 6)
+        stop_loss_price = self._round_to_precision(stop_loss_price, 6)
         take_profit_price = self._round_to_precision(
-            entry_price + (abs(entry_price - stop_loss_price) * self.cfg['rr_ratio']), 2
+            entry_price + (abs(entry_price - stop_loss_price) * self.cfg['rr_ratio']), 6
         )
         
         # 7. Hitung Estimasi Fee (Taker fee Bybit ~0.05% - 0.06%)

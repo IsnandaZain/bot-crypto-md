@@ -1,5 +1,11 @@
 # strategy/signal_engine.py
 # Hanya tambahkan parameter tf_name untuk identifikasi
+import pandas as pd
+import mplfinance as mpf
+import matplotlib.pyplot as plt
+
+from datetime import datetime
+import os
 
 class SignalEngine:
     def __init__(self, df, tf_name='base'):
