@@ -88,3 +88,71 @@ class SignalEngine:
             'rsi': self.last['RSI'],
             'adx': self.last['ADX'],
         }
+
+    def plot_and_save_to_signal_folder(self, signal_folder: str, n_candles: int = 30, symbol: str = "Unknown"):
+        """
+        Plot dan simpan chart ke dalam folder sinyal yang sudah ditentukan.
+        
+        Args:
+            signal_folder: Path ke folder sinyal
+            n_candles: Jumlah candle yang ditampilkan
+            symbol: Nama pair/symbol
+        
+        Returns:
+            Path ke file chart yang disimpan
+        """
+        if self.df.empty:
+            print("DataFrame kosong.")
+            return None
+
+        # Buat folder sinyal jika belum ada
+        os.makedirs(signal_folder, exist_ok=True)
+
+        df = self.df.copy().tail(n_candles)
+        if not isinstance(df.index, pd.DatetimeIndex):
+            df.index = pd.to_datetime(df.index)
+
+        # Validasi kolom
+        required = ['open', 'high', 'low', 'close', 'volume',
+                    'EMA_SHORT', 'EMA_LONG', 'RSI', 'MACDh_12_26_9', 'ADX']
+        missing = [c for c in required if c not in df.columns]
+        if missing:
+            raise ValueError(f"Kolom wajib belum ada: {missing}")
+
+        # Setup overlay plot
+        tf_name = getattr(self, "tf_name", "Chart")
+        apds = [
+            mpf.make_addplot(df['EMA_SHORT'], color='blue', width=0.8, ylabel='EMA/MACD'),
+            mpf.make_addplot(df['EMA_LONG'], color='red', width=0.8),
+            mpf.make_addplot(df['RSI'], panel=1, color='purple', ylabel='RSI'),
+            mpf.make_addplot(pd.DataFrame({'30': [30]*len(df), '70': [70]*len(df)}, index=df.index),
+                             panel=1, color='black', linestyle=':', width=0.8),
+            mpf.make_addplot(df['MACDh_12_26_9'], type='bar', panel=2,
+                             color=['green' if v >= 0 else 'red' for v in df['MACDh_12_26_9']],
+                             ylabel='MACD Hist'),
+            mpf.make_addplot(df['ADX'], panel=3, color='orange', width=1.5, ylabel='ADX')
+        ]
+
+        # 🔹 Generate filename
+        safe_symbol = symbol.replace('/', '_').replace(':', '_')
+        filename = os.path.join(signal_folder, f"{safe_symbol}_ema_{tf_name}_chart.png")
+
+        # 🔹 Plot & Simpan langsung
+        mpf.plot(
+            df,
+            type='candle',
+            style='charles',
+            title=f'\n{symbol} ({tf_name}) - Last {n_candles} Candles',
+            ylabel='Price',
+            volume=True,
+            addplot=apds,
+            figratio=(16, 9),
+            figscale=1.1,
+            tight_layout=True,
+            savefig=filename
+        )
+
+        # 🔹 Bersihkan memori
+        plt.close('all')
+        print(f"✅ Chart sinyal disimpan: {filename}")
+        return filename

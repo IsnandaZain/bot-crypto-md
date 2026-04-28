@@ -21,59 +21,68 @@ class SignalEngineBB:
         """Analisis teknikal BB untuk satu timeframe tertentu (mirip SignalEngine.analyze)"""
         if self.df.empty:
             return "NEUTRAL", 0, []
-        
-        row = self.df.iloc[-1]
-        prev = self.df.iloc[-2]
+
+        row = self.df.iloc[-1]       # forming candle (belum close)
+        prev = self.df.iloc[-2]      # closed candle (sudah close) ← SINYAL UTAMA
         score = 0
         reasons = []
 
         adx = row['adx']
 
-        # 1. Bollinger Bands & Trend Bias
-        if row['close'] > row['bb_mid']:
+        # 1. Bollinger Bands & Trend Bias (gunakan closed candle untuk sinyal utama)
+        if prev['close'] > prev['bb_mid']:
             score += 1
-            reasons.append(f"{self.tf_name}: Price Above BB Mid")
+            reasons.append(f"{self.tf_name}: Price Above BB Mid (closed)")
         else:
             score -= 1
-            reasons.append(f"{self.tf_name}: Price Below BB Mid")
+            reasons.append(f"{self.tf_name}: Price Below BB Mid (closed)")
 
-        # 2. Reversal / Bounce Signals (BB Extremes + S/R)
-        long_bb = row['close'] <= row['bb_lower']
-        short_bb = row['close'] >= row['bb_upper']
-        long_sr = row.get('is_sup', 0) or abs(row['close'] - row['low'])/row['close'] < self.tolerance
-        short_sr = row.get('is_res', 0) or abs(row['close'] - row['high'])/row['close'] < self.tolerance
+        # 2. Reversal / Bounce Signals (BB Extremes + S/R) — Closed candle only
+        long_bb = prev['low'] <= prev['bb_lower']    # Closed candle pernah sentuh bb_lower
+        short_bb = prev['high'] >= prev['bb_upper']  # Closed candle pernah sentuh bb_upper
+        long_sr = prev.get('is_sup', 0) or abs(prev['close'] - prev['low'])/prev['close'] < self.tolerance
+        short_sr = prev.get('is_res', 0) or abs(prev['close'] - prev['high'])/prev['close'] < self.tolerance
 
         if long_bb:
             score += 1
-            reasons.append(f"{self.tf_name}: BB Lower Touched")
+            reasons.append(f"{self.tf_name}: BB Lower Touched (closed)")
             if long_sr:
                 score += 1  # Total +2 jika konfluensi
                 reasons.append(f"{self.tf_name}: + S/R Support Confirmed")
         elif short_bb:
             score -= 1
-            reasons.append(f"{self.tf_name}: BB Upper Touched")
+            reasons.append(f"{self.tf_name}: BB Upper Touched (closed)")
             if short_sr:
                 score -= 1  # Total -2 jika konfluensi
                 reasons.append(f"{self.tf_name}: + S/R Resistance Confirmed")
 
-        # 3. RSI Momentum
-        if row['rsi'] < 35:
-            score += 1
-            reasons.append(f"{self.tf_name}: RSI Oversold")
-        elif row['rsi'] > 65:
-            score -= 1
-            reasons.append(f"{self.tf_name}: RSI Overbought")
+        # 2b. Real-time confirmation (forming candle) — konfirmasi sinyal yang sudah terbentuk
+        if score != 0:
+            forming_long = row['low'] <= row['bb_lower']
+            forming_short = row['high'] >= row['bb_upper']
+            if forming_long and long_bb:
+                reasons.append(f"{self.tf_name}: Forming candle confirms BB Lower touch")
+            elif forming_short and short_bb:
+                reasons.append(f"{self.tf_name}: Forming candle confirms BB Upper touch")
 
-        # 4. MACD Histogram Change
-        if row['macd_hist'] > prev['macd_hist']:
+        # 3. RSI Momentum (closed candle)
+        if prev['rsi'] < 35:
+            score += 1
+            reasons.append(f"{self.tf_name}: RSI Oversold (closed)")
+        elif prev['rsi'] > 65:
+            score -= 1
+            reasons.append(f"{self.tf_name}: RSI Overbought (closed)")
+
+        # 4. MACD Histogram Change (closed vs previous closed)
+        if prev['macd_hist'] > self.df.iloc[-3]['macd_hist']:
             score += 0.5
         else:
             score -= 0.5
 
-        # 5. Volume Confirmation
-        if row['volume'] > row['vol_ma'] * 1.2:
+        # 5. Volume Confirmation (closed candle)
+        if prev['volume'] > prev['vol_ma'] * 1.2:
             score += 0.5 if score > 0 else -0.5
-            reasons.append(f"{self.tf_name}: High Volume")
+            reasons.append(f"{self.tf_name}: High Volume (closed)")
 
         # Tentukan status TF
         if score >= 2: signal = "BULLISH"
@@ -106,7 +115,7 @@ class SignalEngineBB:
             df.index = pd.to_datetime(df.index)
 
         # Validasi kolom (sama seperti sebelumnya)
-        required = ['open', 'high', 'low', 'close', 'volume', 
+        required = ['open', 'high', 'low', 'close', 'volume',
                     'bb_upper', 'bb_mid', 'bb_lower', 'rsi', 'macd_hist', 'vol_ma']
         missing = [c for c in required if c not in df.columns]
         if missing:
@@ -119,7 +128,7 @@ class SignalEngineBB:
             mpf.make_addplot(df['bb_mid'],  color='gray', width=0.8, linestyle='--'),
             mpf.make_addplot(df['bb_lower'], color='blue', width=0.8),
             mpf.make_addplot(df['rsi'], panel=1, color='purple', ylabel='RSI'),
-            mpf.make_addplot(pd.DataFrame({'30': [30]*len(df), '70': [70]*len(df)}, index=df.index), 
+            mpf.make_addplot(pd.DataFrame({'30': [30]*len(df), '70': [70]*len(df)}, index=df.index),
                              panel=1, color='black', linestyle=':', width=0.8),
             mpf.make_addplot(df['macd_hist'], type='bar', panel=2,
                              color=['green' if v >= 0 else 'red' for v in df['macd_hist']],
@@ -134,11 +143,11 @@ class SignalEngineBB:
 
         # 🔹 Plot & Simpan langsung
         mpf.plot(
-            df, 
-            type='candle', 
+            df,
+            type='candle',
             style='charles',
             title=f'\n{symbol} ({tf_name}) - Last {n_candles} Candles',
-            ylabel='Price', 
+            ylabel='Price',
             volume=True,
             addplot=apds,
             figratio=(16, 9),
@@ -150,4 +159,73 @@ class SignalEngineBB:
         # 🔹 Bersihkan memori (penting jika dijalankan dalam loop/batch)
         plt.close('all')
         print(f"✅ Chart berhasil disimpan: {filename}")
+        return filename
+
+    def plot_and_save_to_signal_folder(self, signal_folder: str, n_candles: int = 30, symbol: str = "Unknown"):
+        """
+        Plot dan simpan chart ke dalam folder sinyal yang sudah ditentukan.
+        
+        Args:
+            signal_folder: Path ke folder sinyal (contoh: signals/2026-04-28/SOLUSDT_LONG_150823)
+            n_candles: Jumlah candle yang ditampilkan
+            symbol: Nama pair/symbol
+        
+        Returns:
+            Path ke file chart yang disimpan
+        """
+        if self.df.empty:
+            print("DataFrame kosong.")
+            return None
+
+        # Buat folder sinyal jika belum ada
+        os.makedirs(signal_folder, exist_ok=True)
+
+        df = self.df.copy().tail(n_candles)
+        if not isinstance(df.index, pd.DatetimeIndex):
+            df.index = pd.to_datetime(df.index)
+
+        # Validasi kolom
+        required = ['open', 'high', 'low', 'close', 'volume',
+                    'bb_upper', 'bb_mid', 'bb_lower', 'rsi', 'macd_hist', 'vol_ma']
+        missing = [c for c in required if c not in df.columns]
+        if missing:
+            raise ValueError(f"Kolom wajib belum ada: {missing}")
+
+        # Setup overlay plot
+        tf_name = getattr(self, "tf_name", "Chart")
+        apds = [
+            mpf.make_addplot(df['bb_upper'], color='blue', width=0.8),
+            mpf.make_addplot(df['bb_mid'],  color='gray', width=0.8, linestyle='--'),
+            mpf.make_addplot(df['bb_lower'], color='blue', width=0.8),
+            mpf.make_addplot(df['rsi'], panel=1, color='purple', ylabel='RSI'),
+            mpf.make_addplot(pd.DataFrame({'30': [30]*len(df), '70': [70]*len(df)}, index=df.index),
+                             panel=1, color='black', linestyle=':', width=0.8),
+            mpf.make_addplot(df['macd_hist'], type='bar', panel=2,
+                             color=['green' if v >= 0 else 'red' for v in df['macd_hist']],
+                             ylabel='MACD Hist'),
+            mpf.make_addplot(df['volume'], panel=3, color='orange', width=1.5, ylabel='Volume')
+        ]
+
+        # 🔹 Generate filename: chart.png (simple, konsisten)
+        safe_symbol = symbol.replace('/', '_').replace(':', '_')
+        filename = os.path.join(signal_folder, f"{safe_symbol}_bb_{tf_name}_chart.png")
+
+        # 🔹 Plot & Simpan langsung
+        mpf.plot(
+            df,
+            type='candle',
+            style='charles',
+            title=f'\n{symbol} ({tf_name}) - Last {n_candles} Candles',
+            ylabel='Price',
+            volume=True,
+            addplot=apds,
+            figratio=(16, 9),
+            figscale=1.1,
+            tight_layout=True,
+            savefig=filename
+        )
+
+        # 🔹 Bersihkan memori
+        plt.close('all')
+        print(f"✅ Chart sinyal disimpan: {filename}")
         return filename

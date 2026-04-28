@@ -7,6 +7,7 @@ from risk.manager import RiskManager
 from risk.position_sizer import PositionSizer
 from risk.position_tracker import PositionTracker  # ⭐ IMPORT BARU
 from utils.logger import BotLogger
+from utils.file_manager import get_today_folder, create_signal_folder  # ⭐ IMPORT BARU
 
 from strategy.mtf_confluence import MTFConfluence
 from strategy.mtf_confluence_bb import MTFConfluenceBB
@@ -20,7 +21,11 @@ def scan_market():
     print("\n" + "="*70)
     print("🚀 Memulai Multi-Coin MTF Scanner...")
     print("="*70)
-    
+
+    # 0. ⭐ BUAT FOLDER TANGGAL OTOMATIS
+    today_folder = get_today_folder()
+    print(f"📁 Folder sinyal hari ini: {today_folder}")
+
     # 1. Connect Exchange
     exchange_mgr = ExchangeManager()
     exchange = exchange_mgr.connect()
@@ -154,7 +159,7 @@ def scan_market():
             risk_levels = None
             position_info = None
 
-            if signal != "NO_TRADE":
+            if signal not in ["NO_TRADE", "NO TRADE"]:
                 # risk manager
                 rm = RiskManager(
                     atr=risk_data['atr'],
@@ -176,6 +181,16 @@ def scan_market():
                 position_info['symbol'] = symbol
                 position_info['method'] = risk_levels['method']
 
+                # ⭐ BUAT FOLDER SINYAL & SIMPAN CHART
+                signal_folder = create_signal_folder(
+                    pair=symbol.replace('/', '').replace(':', ''),
+                    signal_type=signal,
+                    base_folder=today_folder
+                )
+                
+                # Simpan chart dari semua timeframe
+                mtf.save_signal_charts(signal_folder)
+
                 # Tambahkan ke tracker
                 tracker.add_position(position_info)
                 new_signals.append({
@@ -183,10 +198,11 @@ def scan_market():
                     'signal': signal,
                     'reasons': reasons,
                     'risk': risk_levels,
-                    'position': position_info
+                    'position': position_info,
+                    'chart_folder': signal_folder  # ⭐ TAMBAHKAN INFO FOLDER
                 })
 
-            if signal_bb != "NO_TRADE":
+            if signal_bb not in ["NO_TRADE", "NO TRADE"]:
                 # risk manager - bb
                 rm_bb = RiskManager(
                     atr=risk_data_bb['atr'],
@@ -208,6 +224,16 @@ def scan_market():
                 position_info_bb['symbol'] = symbol
                 position_info_bb['method'] = risk_levels_bb['method']
 
+                # ⭐ BUAT FOLDER SINYAL & SIMPAN CHART
+                signal_folder = create_signal_folder(
+                    pair=symbol.replace('/', '').replace(':', ''),
+                    signal_type=signal_bb,
+                    base_folder=today_folder
+                )
+                
+                # Simpan chart dari semua timeframe
+                mtf_bb.save_signal_charts(signal_folder)
+
                 # Tambahkan ke tracker
                 tracker.add_position(position_info_bb)
                 new_signals.append({
@@ -215,7 +241,8 @@ def scan_market():
                     'signal': signal_bb,
                     'reasons': reasons_bb,
                     'risk': risk_levels_bb,
-                    'position': position_info_bb
+                    'position': position_info_bb,
+                    'chart_folder': signal_folder  # ⭐ TAMBAHKAN INFO FOLDER
                 })
 
 

@@ -55,3 +55,30 @@ class MTFConfluenceBB:
             'price': base_data['price'],
             'df_base': self.base_se.df  # ⭐ KIRIM DataFrame untuk deteksi S/R
         }
+
+    def save_signal_charts(self, signal_folder: str):
+        """
+        Simpan chart dari semua timeframe ke folder sinyal.
+        
+        Args:
+            signal_folder: Path folder sinyal untuk menyimpan chart
+        """
+        try:
+            self.higher_se.plot_and_save_to_signal_folder(
+                signal_folder=signal_folder, 
+                n_candles=30, 
+                symbol=self.symbol
+            )
+            self.base_se.plot_and_save_to_signal_folder(
+                signal_folder=signal_folder, 
+                n_candles=30, 
+                symbol=self.symbol
+            )
+            self.lower_se.plot_and_save_to_signal_folder(
+                signal_folder=signal_folder, 
+                n_candles=30, 
+                symbol=self.symbol
+            )
+            print(f"✅ Semua chart {self.symbol} disimpan ke {signal_folder}")
+        except Exception as e:
+            print(f"⚠️ Gagal menyimpan chart {self.symbol}: {e}")
