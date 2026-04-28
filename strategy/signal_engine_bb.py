@@ -43,12 +43,18 @@ class SignalEngineBB:
         long_sr = row.get('is_sup', 0) or abs(row['close'] - row['low'])/row['close'] < self.tolerance
         short_sr = row.get('is_res', 0) or abs(row['close'] - row['high'])/row['close'] < self.tolerance
 
-        if long_bb and long_sr:
-            score += 2
-            reasons.append(f"{self.tf_name}: BB Lower + Support Confirmed")
-        elif short_bb and short_sr:
-            score -= 2
-            reasons.append(f"{self.tf_name}: BB Upper + Resistance Confirmed")
+        if long_bb:
+            score += 1
+            reasons.append(f"{self.tf_name}: BB Lower Touched")
+            if long_sr:
+                score += 1  # Total +2 jika konfluensi
+                reasons.append(f"{self.tf_name}: + S/R Support Confirmed")
+        elif short_bb:
+            score -= 1
+            reasons.append(f"{self.tf_name}: BB Upper Touched")
+            if short_sr:
+                score -= 1  # Total -2 jika konfluensi
+                reasons.append(f"{self.tf_name}: + S/R Resistance Confirmed")
 
         # 3. RSI Momentum
         if row['rsi'] < 35:

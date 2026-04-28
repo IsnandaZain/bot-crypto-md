@@ -76,25 +76,31 @@ def scan_market():
     print(f"Posisi Terbuka: {open_positions_count}/{max_positions}")
     
     new_signals = []
-    
+
     # Hanya cari sinyal baru jika masih ada slot
     if open_positions_count < max_positions:
         fetcher = DataFetcher(exchange)
-        
+
         for symbol in WATCHLIST:
-            # SKIP jika sudah ada posisi aktif untuk koin ini
-            if tracker.is_position_active(symbol):
-                print(f"⏭️  Skip {symbol} (sudah ada posisi aktif)")
-                continue
-            
             print(f"\n🔍 Scanning {symbol}...")
-            
+
+            # Cek apakah ada posisi aktif untuk koin ini
+            active_position = tracker.get_active_position(symbol)
+            existing_signal = None
+
+            if active_position:
+                existing_signal = active_position['signal']
+                opposite_signal = "SHORT" if existing_signal == "LONG" else "LONG"
+                print(f"⚡ Ada posisi aktif: {existing_signal} → Mencari peluang {opposite_signal} saja")
+            else:
+                print(f"📍 Tidak ada posisi aktif → Mencari semua peluang")
+
             # Fetch Multi-TF
             df_dict = fetcher.fetch_multi_timeframe(symbol)
             df_dict_bb = df_dict.copy()
             if df_dict is None:
                 continue
-            
+
             # Calculate Indicators
             ind_calc = IndicatorCalculator(df_dict)
             df_dict = ind_calc.calculate_all()
@@ -114,14 +120,23 @@ def scan_market():
                 print(f"📄 Data debug {symbol} disimpan ke {debug_file}")
             except Exception as e:
                 print(f"⚠️ Gagal menyimpan file debug untuk {symbol}: {e}")
-            
+
             # Analyze Confluence
             mtf = MTFConfluence(df_dict, symbol)
             signal, reasons, score = mtf.analyze()
-            
+
             # Analyze Confluence - BB
             mtf_bb = MTFConfluenceBB(df_dict_bb, symbol)
             signal_bb, reasons_bb, score_bb = mtf_bb.analyze()
+
+            # 🎯 FILTER: Jika ada posisi aktif, hanya terima sinyal berlawanan
+            if active_position:
+                if signal == existing_signal:
+                    print(f"⏭️  Skip {signal} (sama dengan posisi aktif {existing_signal})")
+                    signal = "NO_TRADE"
+                if signal_bb == existing_signal:
+                    print(f"⏭️  Skip {signal_bb} BB (sama dengan posisi aktif {existing_signal})")
+                    signal_bb = "NO_TRADE"
 
             # add logger
             emoji = "🟢" if signal == "LONG" else "🔴" if signal == "SHORT" else "⚪"
@@ -134,12 +149,12 @@ def scan_market():
             # get risk data
             risk_data = mtf.get_risk_data()
             risk_data_bb = mtf_bb.get_risk_data()
-            
+
             # Calculate Risk Levels
             risk_levels = None
             position_info = None
-            
-            if signal != "NO TRADE":
+
+            if signal != "NO_TRADE":
                 # risk manager
                 rm = RiskManager(
                     atr=risk_data['atr'],
@@ -148,7 +163,7 @@ def scan_market():
                     df_base=risk_data.get('df_base')
                 )
                 risk_levels = rm.calculate_levels()
-                
+
                 # position sizer
                 ps = PositionSizer(account_balance, TRADING_CONFIG['leverage'])
                 position_info = ps.calculate_position(
@@ -156,11 +171,11 @@ def scan_market():
                     stop_loss_price=risk_levels['stop_loss'],
                     signal=signal
                 )
-                
+
                 # Tambahkan symbol ke position_info
                 position_info['symbol'] = symbol
                 position_info['method'] = risk_levels['method']
-                
+
                 # Tambahkan ke tracker
                 tracker.add_position(position_info)
                 new_signals.append({
@@ -171,7 +186,7 @@ def scan_market():
                     'position': position_info
                 })
 
-            if signal_bb != "NO TRADE":
+            if signal_bb != "NO_TRADE":
                 # risk manager - bb
                 rm_bb = RiskManager(
                     atr=risk_data_bb['atr'],
@@ -192,7 +207,7 @@ def scan_market():
                 # Tambahkan symbol ke position_info
                 position_info_bb['symbol'] = symbol
                 position_info_bb['method'] = risk_levels_bb['method']
-                
+
                 # Tambahkan ke tracker
                 tracker.add_position(position_info_bb)
                 new_signals.append({

@@ -23,7 +23,19 @@ WATCHLIST = [
 ]
 
 """ 
- 
+     'SOL/USDT:USDT',
+    'XRP/USDT:USDT',
+    'HYPE/USDT:USDT',
+    'ADA/USDT:USDT',
+    'TAO/USDT:USDT',
+    'SUI/USDT:USDT',
+    'ASTER/USDT:USDT',
+    'DOGE/USDT:USDT',
+    'PENDLE/USDT:USDT',
+    'FARTCOIN/USDT:USDT',   
+    'PENGU/USDT:USDT',
+    'ARB/USDT:USDT',
+    'NEAR/USDT:USDT'
 """
 
 # KONFIGURASI MULTI-TIMEFRAME
@@ -38,7 +50,7 @@ TRADING_CONFIG = {
     'max_position_size_pct': 4,
 
     # ⭐ ACCOUNT SETTINGS (Untuk Position Sizing)
-    'account_balance_usdt': 56,  # ⚠️ ISI DENGAN BALANCE ANDA (Manual/Paper)
+    'account_balance_usdt': 63,  # ⚠️ ISI DENGAN BALANCE ANDA (Manual/Paper)
     'auto_fetch_balance': False,   # True jika mau ambil dari API (butuh API Key)
 
     # ⭐ MAX SIMULTANEOUS POSITIONS (BARU)
@@ -97,7 +109,7 @@ RISK_CONFIG = {
     'sl_max_pct': 0.08,                # Naik dari 5% → 8% (maximum SL)
     
     # ⭐ Risk:Reward lebih agresif
-    'rr_ratio': 2.5,                   # Naik dari 2.0 → 2.5 (TP lebih jauh)
+    'rr_ratio': 2,                   # Naik dari 2.0 → 2.5 (TP lebih jauh)
     
     # ⭐ Hybrid SL Config
     'use_hybrid_sl': True,
@@ -112,6 +124,6 @@ RISK_CONFIG = {
 STORAGE_CONFIG = {
     'data_folder': 'data',
     'positions_file': 'active_positions.json',
-    'max_history_records': 50,
+    'max_history_records': 100,
 }
 

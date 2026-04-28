@@ -113,7 +113,7 @@ class PositionTracker:
 
             # jika sudah diatas 105% auto TP saja
             # print((pos['current_price'] - pos['entry_price']) / pos['entry_price'] * 100 * pos['leverage'])
-            if (pos['current_price'] - pos['entry_price']) / pos['entry_price'] * 100 * pos['leverage'] > 105:
+            if (pos['current_price'] - pos['entry_price']) / pos['entry_price'] * 100 * pos['leverage'] > 150:
                 exit_price = pos['current_price']
                 exit_reason = 'AUTO_TP_HIT'
 
