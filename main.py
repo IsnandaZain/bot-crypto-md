@@ -5,7 +5,8 @@ from core.data_fetcher import DataFetcher
 
 from risk.manager import RiskManager
 from risk.position_sizer import PositionSizer
-from risk.position_tracker import PositionTracker  # ⭐ IMPORT BARU
+from risk.position_tracker import PositionTracker
+from risk.balance_manager import BalanceManager  # ⭐ Balance dinamis
 from utils.logger import BotLogger
 from utils.file_manager import get_today_folder, create_signal_folder  # ⭐ IMPORT BARU
 
@@ -16,6 +17,100 @@ from indicators.technical import IndicatorCalculator
 from indicators.technical_bb import IndicatorCalculatorBB
 
 from config import WATCHLIST, TRADING_CONFIG
+from datetime import datetime
+import os
+
+
+def save_signal_details(signal_folder: str, symbol: str, signal_type: str, risk_data: dict, position_data: dict, reasons: list, method: str = "Unknown"):
+    """
+    Simpan detail sinyal ke file TXT dalam folder sinyal.
+    
+    Args:
+        signal_folder: Path folder sinyal
+        symbol: Nama pair/symbol
+        signal_type: Jenis sinyal (LONG/SHORT)
+        risk_data: Data risk (entry, stop_loss, take_profit, dll)
+        position_data: Data position (size, leverage, dll)
+        reasons: List alasan sinyal
+        method: Metode yang digunakan (BB/EMA)
+    """
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Helper untuk format price
+    def fmt_price(val):
+        if val is None:
+            return "N/A"
+        try:
+            return f"${float(val):,.6f}"
+        except:
+            return str(val)
+    
+    def fmt_val(val):
+        return val if val is not None else "N/A"
+    
+    base_coin = symbol.split('/')[0] if '/' in symbol else symbol.replace('USDT', '')
+    
+    content = f"""================================================================================
+                        📊 SIGNAL DETAILS
+================================================================================
+
+📌 Symbol        : {symbol}
+📌 Signal Type   : {signal_type}
+📌 Method        : {method}
+📌 Generated At  : {timestamp}
+
+--------------------------------------------------------------------------------
+                        💰 ENTRY & RISK LEVELS
+--------------------------------------------------------------------------------
+
+🎯 Entry Price   : {fmt_price(risk_data.get('entry'))}
+🛑 Stop Loss     : {fmt_price(risk_data.get('stop_loss'))}
+🎯 Take Profit 1 : {fmt_price(risk_data.get('take_profit_1'))}
+🎯 Take Profit 2 : {fmt_price(risk_data.get('take_profit_2'))}
+🎯 Take Profit 3 : {fmt_price(risk_data.get('take_profit_3'))}
+
+📊 Risk/Reward   : {fmt_val(risk_data.get('risk_reward_ratio'))}
+
+--------------------------------------------------------------------------------
+                        📈 POSITION DETAILS
+--------------------------------------------------------------------------------
+
+💵 Position Size : {fmt_val(position_data.get('position_size_usd'))} USDT
+📊 Amount        : {fmt_val(position_data.get('amount'))} {base_coin}
+🔧 Leverage     : {fmt_val(position_data.get('leverage'))}x
+📐 Qty           : {fmt_val(position_data.get('qty'))}
+
+--------------------------------------------------------------------------------
+                        🧠 SIGNAL REASONS
+--------------------------------------------------------------------------------
+
+"""
+    
+    for i, reason in enumerate(reasons, 1):
+        content += f"{i}. {reason}\n"
+    
+    content += f"""
+--------------------------------------------------------------------------------
+                        ⚠️ DISCLAIMER
+--------------------------------------------------------------------------------
+
+This signal is generated automatically by the trading bot.
+Always do your own research before making any trading decisions.
+Past performance does not guarantee future results.
+
+================================================================================
+"""
+    
+    # Clean symbol for filename
+    safe_symbol = symbol.replace('/', '_').replace(':', '_')
+    filename = os.path.join(signal_folder, f"{safe_symbol}_signal_details.txt")
+    
+    with open(filename, 'w', encoding='utf-8') as f:
+        f.write(content)
+    
+    print(f"📄 Signal details saved: {filename}")
+    return filename
+
 
 def scan_market():
     print("\n" + "="*70)
@@ -34,19 +129,11 @@ def scan_market():
     
     # 2. Initialize Position Tracker (Load dari JSON)
     tracker = PositionTracker()
-    
-    # 3. Get Account Balance
-    if TRADING_CONFIG['auto_fetch_balance']:
-        try:
-            balance_info = exchange.fetch_balance()
-            account_balance = balance_info['total']['USDT']
-            print(f"💰 Balance dari API: ${account_balance:.2f}")
-        except:
-            account_balance = TRADING_CONFIG['account_balance_usdt']
-            print(f"⚠️ Gagal fetch balance, pakai manual: ${account_balance:.2f}")
-    else:
-        account_balance = TRADING_CONFIG['account_balance_usdt']
-        print(f"💰 Balance Manual: ${account_balance:.2f}")
+
+    # 3. ⭐ Initialize Balance Manager (Dynamic Balance)
+    balance_mgr = BalanceManager()
+    account_balance = balance_mgr.get_balance()
+    print(f"💰 Balance saat ini: ${account_balance:.2f}")
     
     # 4. Fetch Current Prices untuk Semua Koin (Untuk Cek TP/SL)
     current_prices = {}
@@ -64,10 +151,14 @@ def scan_market():
     
     tracker.update_unrealized_pnl(current_prices)
     closed_positions = tracker.check_tp_sl(current_prices)
-    
+
     # Log closed positions
     if closed_positions:
         BotLogger.log_closed_positions(closed_positions)
+        # ⭐ Update balance dari PnL posisi yang di-close
+        balance_mgr.update_from_closed_positions(closed_positions)
+        # Refresh balance untuk scan berikutnya
+        account_balance = balance_mgr.get_balance()
     
     # 6. ⭐ PRIORITAS 2: Cek Sinyal Baru (Hanya Jika Ada Slot)
     print("\n" + "="*70)
@@ -187,9 +278,20 @@ def scan_market():
                     signal_type=signal,
                     base_folder=today_folder
                 )
-                
+
                 # Simpan chart dari semua timeframe
                 mtf.save_signal_charts(signal_folder)
+                
+                # ⭐ SIMPAN DETAIL SINYAL KE TXT
+                save_signal_details(
+                    signal_folder=signal_folder,
+                    symbol=symbol,
+                    signal_type=signal,
+                    risk_data=risk_levels,
+                    position_data=position_info,
+                    reasons=reasons,
+                    method=risk_levels.get('method', 'EMA')
+                )
 
                 # Tambahkan ke tracker
                 tracker.add_position(position_info)
@@ -230,9 +332,20 @@ def scan_market():
                     signal_type=signal_bb,
                     base_folder=today_folder
                 )
-                
+
                 # Simpan chart dari semua timeframe
                 mtf_bb.save_signal_charts(signal_folder)
+                
+                # ⭐ SIMPAN DETAIL SINYAL KE TXT
+                save_signal_details(
+                    signal_folder=signal_folder,
+                    symbol=symbol,
+                    signal_type=signal_bb,
+                    risk_data=risk_levels_bb,
+                    position_data=position_info_bb,
+                    reasons=reasons_bb,
+                    method=risk_levels_bb.get('method', 'BB')
+                )
 
                 # Tambahkan ke tracker
                 tracker.add_position(position_info_bb)
@@ -270,4 +383,4 @@ if __name__ == "__main__":
             break
         except Exception as e:
             print(f"❌ Error di main loop: {e}")
-            time.sleep(10)
+            time.sleep(90)

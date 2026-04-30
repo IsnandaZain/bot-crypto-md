@@ -18,79 +18,142 @@ class SignalEngineBB:
         self.tolerance = 0.005 # 0.5% untuk deteksi S/R proximity
     
     def analyze(self):
-        """Analisis teknikal BB untuk satu timeframe tertentu (mirip SignalEngine.analyze)"""
+        """Analisis teknikal BB untuk satu timeframe — Confluence-based, bukan scoring arbitrer"""
         if self.df.empty:
             return "NEUTRAL", 0, []
 
         row = self.df.iloc[-1]       # forming candle (belum close)
         prev = self.df.iloc[-2]      # closed candle (sudah close) ← SINYAL UTAMA
-        score = 0
+        prev2 = self.df.iloc[-3]     # previous closed candle untuk MACD change
         reasons = []
+        confluence_count = 0
+        total_checks = 0
 
-        adx = row['adx']
+        # ──────────────────────────────────────────────
+        # 1. TREND BIAS (BB Mid) — Filter Utama
+        # ──────────────────────────────────────────────
+        total_checks += 1
+        trend_bullish = prev['close'] > prev['bb_mid']
+        trend_bearish = prev['close'] < prev['bb_mid']
 
-        # 1. Bollinger Bands & Trend Bias (gunakan closed candle untuk sinyal utama)
-        if prev['close'] > prev['bb_mid']:
-            score += 1
+        if trend_bullish:
             reasons.append(f"{self.tf_name}: Price Above BB Mid (closed)")
-        else:
-            score -= 1
+        elif trend_bearish:
             reasons.append(f"{self.tf_name}: Price Below BB Mid (closed)")
 
-        # 2. Reversal / Bounce Signals (BB Extremes + S/R) — Closed candle only
+        # ──────────────────────────────────────────────
+        # 2. BB TOUCH + S/R CONFIRMATION — Reversal Signal
+        #    Closed candle only, low/high untuk deteksi wick
+        # ──────────────────────────────────────────────
+        total_checks += 1
+        bb_sr_confirms = False
+
         long_bb = prev['low'] <= prev['bb_lower']    # Closed candle pernah sentuh bb_lower
         short_bb = prev['high'] >= prev['bb_upper']  # Closed candle pernah sentuh bb_upper
         long_sr = prev.get('is_sup', 0) or abs(prev['close'] - prev['low'])/prev['close'] < self.tolerance
         short_sr = prev.get('is_res', 0) or abs(prev['close'] - prev['high'])/prev['close'] < self.tolerance
 
-        if long_bb:
-            score += 1
-            reasons.append(f"{self.tf_name}: BB Lower Touched (closed)")
-            if long_sr:
-                score += 1  # Total +2 jika konfluensi
-                reasons.append(f"{self.tf_name}: + S/R Support Confirmed")
+        if long_bb and long_sr:
+            bb_sr_confirms = True
+            confluence_count += 1
+            reasons.append(f"{self.tf_name}: BB Lower + S/R Support (closed)")
+        elif short_bb and short_sr:
+            bb_sr_confirms = True
+            confluence_count += 1
+            reasons.append(f"{self.tf_name}: BB Upper + S/R Resistance (closed)")
+        elif long_bb:
+            reasons.append(f"{self.tf_name}: BB Lower Touched (no S/R confirm)")
         elif short_bb:
-            score -= 1
-            reasons.append(f"{self.tf_name}: BB Upper Touched (closed)")
-            if short_sr:
-                score -= 1  # Total -2 jika konfluensi
-                reasons.append(f"{self.tf_name}: + S/R Resistance Confirmed")
+            reasons.append(f"{self.tf_name}: BB Upper Touched (no S/R confirm)")
+        else:
+            reasons.append(f"{self.tf_name}: No BB Extreme Touch")
 
-        # 2b. Real-time confirmation (forming candle) — konfirmasi sinyal yang sudah terbentuk
-        if score != 0:
+        # ──────────────────────────────────────────────
+        # 3. RSI MOMENTUM — Harus SEARAH dengan bias
+        # ──────────────────────────────────────────────
+        total_checks += 1
+        rsi_agrees = False
+
+        if trend_bullish and prev['rsi'] > 45 and prev['rsi'] < 70:
+            rsi_agrees = True
+            confluence_count += 1
+            reasons.append(f"{self.tf_name}: RSI Bullish ({prev['rsi']:.0f})")
+        elif trend_bearish and prev['rsi'] < 55 and prev['rsi'] > 30:
+            rsi_agrees = True
+            confluence_count += 1
+            reasons.append(f"{self.tf_name}: RSI Bearish ({prev['rsi']:.0f})")
+        elif prev['rsi'] > 70:
+            reasons.append(f"{self.tf_name}: RSI Overbought ({prev['rsi']:.0f}) — Reversal Risk")
+        elif prev['rsi'] < 30:
+            reasons.append(f"{self.tf_name}: RSI Oversold ({prev['rsi']:.0f}) — Reversal Risk")
+        else:
+            reasons.append(f"{self.tf_name}: RSI Neutral ({prev['rsi']:.0f})")
+
+        # ──────────────────────────────────────────────
+        # 4. MACD HISTOGRAM — Momentum Confirmation
+        # ──────────────────────────────────────────────
+        total_checks += 1
+        macd_agrees = False
+
+        macd_increasing = prev['macd_hist'] > prev2['macd_hist']
+        if trend_bullish and macd_increasing:
+            macd_agrees = True
+            confluence_count += 1
+            reasons.append(f"{self.tf_name}: MACD Increasing (bullish)")
+        elif trend_bearish and not macd_increasing:
+            macd_agrees = True
+            confluence_count += 1
+            reasons.append(f"{self.tf_name}: MACD Decreasing (bearish)")
+        else:
+            reasons.append(f"{self.tf_name}: MACD Diverges")
+
+        # ──────────────────────────────────────────────
+        # 5. VOLUME — Confirmation
+        # ──────────────────────────────────────────────
+        total_checks += 1
+        volume_strong = False
+        if prev['volume'] > prev['vol_ma'] * 1.2:
+            volume_strong = True
+            confluence_count += 0.5  # Volume penguat, bukan penentu arah
+            reasons.append(f"{self.tf_name}: Volume Strong ({prev['volume']/prev['vol_ma']:.1f}x avg)")
+        else:
+            reasons.append(f"{self.tf_name}: Volume Weak ({prev['volume']/prev['vol_ma']:.1f}x avg)")
+
+        # ──────────────────────────────────────────────
+        # 5b. FORMING CANDLE CONFIRMATION (Real-time)
+        # ──────────────────────────────────────────────
+        forming_confirms = False
+        if confluence_count > 0:  # Hanya jika sudah ada konfirmasi dari closed candle
             forming_long = row['low'] <= row['bb_lower']
             forming_short = row['high'] >= row['bb_upper']
-            if forming_long and long_bb:
-                reasons.append(f"{self.tf_name}: Forming candle confirms BB Lower touch")
-            elif forming_short and short_bb:
-                reasons.append(f"{self.tf_name}: Forming candle confirms BB Upper touch")
+            if (long_bb and forming_long) or (short_bb and forming_short):
+                forming_confirms = True
+                reasons.append(f"{self.tf_name}: Forming candle confirms BB touch")
 
-        # 3. RSI Momentum (closed candle)
-        if prev['rsi'] < 35:
-            score += 1
-            reasons.append(f"{self.tf_name}: RSI Oversold (closed)")
-        elif prev['rsi'] > 65:
-            score -= 1
-            reasons.append(f"{self.tf_name}: RSI Overbought (closed)")
+        # ──────────────────────────────────────────────
+        # KEPUTUSAN: Confluence Rate
+        # ──────────────────────────────────────────────
+        confluence_rate = confluence_count / total_checks
 
-        # 4. MACD Histogram Change (closed vs previous closed)
-        if prev['macd_hist'] > self.df.iloc[-3]['macd_hist']:
-            score += 0.5
+        # VETO conditions
+        if prev['rsi'] > 75 or prev['rsi'] < 25:
+            signal = "NEUTRAL"
+            reasons.append(f"{self.tf_name}: VETO — RSI Extreme ({prev['rsi']:.0f})")
+        elif not trend_bullish and not trend_bearish:
+            signal = "NEUTRAL"
+            reasons.append(f"{self.tf_name}: VETO — Price at BB Mid, unclear bias")
+        elif confluence_rate >= 0.6:
+            signal = "BULLISH" if trend_bullish else "BEARISH"
         else:
-            score -= 0.5
+            signal = "NEUTRAL"
+            reasons.append(f"{self.tf_name}: Confluence rendah ({confluence_rate:.0%})")
 
-        # 5. Volume Confirmation (closed candle)
-        if prev['volume'] > prev['vol_ma'] * 1.2:
-            score += 0.5 if score > 0 else -0.5
-            reasons.append(f"{self.tf_name}: High Volume (closed)")
-
-        # Tentukan status TF
-        if score >= 2: signal = "BULLISH"
-        elif score <= -2: signal = "BEARISH"
-        else: signal = "NEUTRAL"
+        # Normalize score ke -3 s/d +3
+        score = (confluence_rate - 0.5) * 6
+        score = max(-3, min(3, score))
 
         return signal, score, reasons
-    
+
     def get_data(self):
         """Ambil data penting dari timeframe ini"""
         return {

@@ -12,38 +12,45 @@ class MTFConfluenceBB:
         self.lower_se = SignalEngineBB(df_dict['lower'], '15m')    
 
     def analyze(self):
-        """Gabungkan hasil analisis dari semua timeframe"""
+        """Gabungkan hasil analisis dari semua timeframe — Confluence Rate based"""
         # Analisis per TF
         higher_signal, higher_score, higher_reasons = self.higher_se.analyze()
         base_signal, base_score, base_reasons = self.base_se.analyze()
         lower_signal, lower_score, lower_reasons = self.lower_se.analyze()
 
-        # 📊 Log skor individual per timeframe untuk memantau konfluensi
-        print(f"📊 {self.symbol} BB - TF Scores -> 4h: {higher_score} | 1h: {base_score} | 15m: {lower_score}")
-
-        # Generate Chart Image
-        # higher_chart = self.higher_se.plot_and_save_last_n(n_candles=30, symbol=self.symbol)
-        # base_chart = self.base_se.plot_and_save_last_n(n_candles=30, symbol=self.symbol)
-        # lower_chart = self.lower_se.plot_and_save_last_n(n_candles=30, symbol=self.symbol)
-
-        # Bobot skor: Higher TF lebih penting
-        total_score = (higher_score * 2) + (base_score * 1.5) + (lower_score * 1)
+        # 📊 Log skor individual per timeframe
+        print(f"📊 {self.symbol} BB - TF Scores -> 4h: {higher_score:.2f} | 1h: {base_score:.2f} | 15m: {lower_score:.2f}")
 
         reasons = higher_reasons + base_reasons + lower_reasons
 
-        # Keputusan akhir
-        if total_score >= 5:
+        # ──────────────────────────────────────────────
+        # WEIGHTED CONFLUENCE SCORE
+        # Bobot: 4h (50%) > 1h (30%) > 15m (20%)
+        # ──────────────────────────────────────────────
+        total_score = (higher_score * 0.5) + (base_score * 0.3) + (lower_score * 0.2)
+
+        # VETO HIERARCHY — Hard rules
+        if higher_signal in ("NEUTRAL", "NO_TRADE"):
+            signal = "NO TRADE"
+            reasons.append("4h VETO — Trend tidak jelas di higher TF")
+            return signal, reasons, total_score
+
+        if (higher_score > 0 and base_score < 0) or (higher_score < 0 and base_score > 0):
+            signal = "NO TRADE"
+            reasons.append("HTF DIVERGENCE — 4h dan 1h berlawanan arah")
+            return signal, reasons, total_score
+
+        if (higher_score > 0 and lower_score < -1) or (higher_score < 0 and lower_score > 1):
+            reasons.append("LTF DIVERGENCE — 15m berlawanan, entry harus hati-hati")
+            total_score *= 0.7
+
+        if total_score >= 1.0:
             signal = "LONG"
-        elif total_score <= -5:
+        elif total_score <= -1.0:
             signal = "SHORT"
         else:
             signal = "NO TRADE"
-            reasons.append("Skor konfluensi tidak cukup")
-
-        # Veto: Jika higher TF netral, jangan trade
-        if higher_signal == "NEUTRAL":
-            signal = "NO TRADE"
-            reasons.append("4h Trend Tidak Jelas (Veto)")
+            reasons.append(f"Confluence lemah (score: {total_score:.2f}, butuh ±1.0)")
 
         return signal, reasons, total_score
     

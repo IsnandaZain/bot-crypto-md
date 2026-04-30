@@ -50,7 +50,7 @@ TRADING_CONFIG = {
     'max_position_size_pct': 4,
 
     # ⭐ ACCOUNT SETTINGS (Untuk Position Sizing)
-    'account_balance_usdt': 63,  # ⚠️ ISI DENGAN BALANCE ANDA (Manual/Paper)
+    'account_balance_usdt': 66,  # ⚠️ ISI DENGAN BALANCE ANDA (Manual/Paper)
     'auto_fetch_balance': False,   # True jika mau ambil dari API (butuh API Key)
 
     # ⭐ MAX SIMULTANEOUS POSITIONS (BARU)

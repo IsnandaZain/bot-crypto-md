@@ -15,11 +15,12 @@ class SignalEngine:
         self.prev = df.iloc[-2]
     
     def analyze(self):
-        """Analisis sinyal untuk 1 timeframe tertentu"""
-        signal = "NEUTRAL"  # Ubah dari NO TRADE agar tidak konflik dengan MTF
-        score = 0
+        """Analisis sinyal untuk 1 timeframe tertentu — Confluence-based, bukan scoring arbitrer"""
+        signal = "NEUTRAL"
         reasons = []
-        
+        confluence_count = 0  # Jumlah indikator yang SEPAKAT
+        total_checks = 0      # Total indikator yang dicek
+
         # Extract values
         ema_short = self.last['EMA_SHORT']
         ema_long = self.last['EMA_LONG']
@@ -29,54 +30,107 @@ class SignalEngine:
         adx = self.last['ADX']
         volume = self.last['volume']
         vol_avg = self.last['VOL_SMA']
-        
-        # Trend Check
+
+        # ──────────────────────────────────────────────
+        # 1. TREND BIAS (EMA Cross) — Filter Utama
+        # ──────────────────────────────────────────────
+        total_checks += 1
+        trend_aligned = False
         if ema_short > ema_long:
-            score += 1
+            trend_aligned = True
             reasons.append(f"{self.tf_name}: Bullish Trend")
         elif ema_short < ema_long:
-            score -= 1
+            trend_aligned = False
             reasons.append(f"{self.tf_name}: Bearish Trend")
-        
-        # Momentum Check
-        if macd_hist > 0:
-            score += 0.5
-            reasons.append(f"{self.tf_name}: MACD Positive")
+
+        # ──────────────────────────────────────────────
+        # 2. MOMENTUM CONFIRMATION (MACD + RSI)
+        #    Hanya valid jika SEARAH dengan trend
+        # ──────────────────────────────────────────────
+        total_checks += 1
+        momentum_agrees = False
+
+        macd_positive = macd_hist > 0
+        rsi_bullish = rsi > 50 and rsi < 70  # Bullish tapi belum overbought
+        rsi_bearish = rsi < 50 and rsi > 30  # Bearish tapi belum oversold
+
+        if trend_aligned and macd_positive and rsi_bullish:
+            momentum_agrees = True
+            confluence_count += 1
+            reasons.append(f"{self.tf_name}: Momentum Bullish Confirmed (MACD+, RSI {rsi:.0f})")
+        elif not trend_aligned and not macd_positive and rsi_bearish:
+            momentum_agrees = True
+            confluence_count += 1
+            reasons.append(f"{self.tf_name}: Momentum Bearish Confirmed (MACD-, RSI {rsi:.0f})")
         else:
-            score -= 0.5
-        
-        # RSI Check
-        if 40 < rsi < 60:
-            score += 0.5
-            reasons.append(f"{self.tf_name}: RSI Neutral (Good for Entry)")
-        elif rsi > 70:
-            score -= 1
-            reasons.append(f"{self.tf_name}: RSI Overbought")
+            reasons.append(f"{self.tf_name}: Momentum Diverges (MACD {'+' if macd_positive else '-'} vs RSI {rsi:.0f})")
+
+        # ──────────────────────────────────────────────
+        # 3. RSI EXTREME — Reversal Warning (VETO)
+        #    Jika RSI > 70 atau < 30, batalkan entry searah
+        # ──────────────────────────────────────────────
+        total_checks += 1
+        rsi_extreme = False
+        if rsi > 70:
+            rsi_extreme = True
+            reasons.append(f"{self.tf_name}: RSI Overbought ({rsi:.0f}) — Reversal Risk")
         elif rsi < 30:
-            score += 1
-            reasons.append(f"{self.tf_name}: RSI Oversold")
-        
-        # Volume Check
-        if volume > vol_avg:
-            score += 0.5
-            reasons.append(f"{self.tf_name}: Volume Confirmed")
-        
-        # ADX Check (Trend Strength)
+            rsi_extreme = True
+            reasons.append(f"{self.tf_name}: RSI Oversold ({rsi:.0f}) — Reversal Risk")
+
+        # ──────────────────────────────────────────────
+        # 4. VOLUME CONFIRMATION
+        #    Hanya count jika ada momentum agreement
+        # ──────────────────────────────────────────────
+        total_checks += 1
+        volume_confirms = False
+        if volume > vol_avg * 1.2:  # 20% di atas average
+            volume_confirms = True
+            if momentum_agrees:
+                confluence_count += 1
+                reasons.append(f"{self.tf_name}: Volume Strong ({volume/vol_avg:.1f}x avg)")
+        else:
+            reasons.append(f"{self.tf_name}: Volume Weak ({volume/vol_avg:.1f}x avg)")
+
+        # ──────────────────────────────────────────────
+        # 5. ADX — Trend Strength Filter
+        #    ADX < 20 = ranging, hindari entry trend-following
+        # ──────────────────────────────────────────────
+        total_checks += 1
+        trend_strong = False
         if adx > 25:
-            score += 1
-            reasons.append(f"{self.tf_name}: Strong Trend (ADX>25)")
+            trend_strong = True
+            confluence_count += 0.5  # ADX bukan konfirmasi arah, tapi penguat
+            reasons.append(f"{self.tf_name}: Strong Trend (ADX {adx:.0f})")
         elif adx < 20:
-            score -= 0.5
-            reasons.append(f"{self.tf_name}: Weak Trend (ADX<20)")
-        
-        # Tentukan sinyal berdasarkan score
-        if score >= 2:
-            signal = "BULLISH"
-        elif score <= -2:
-            signal = "BEARISH"
+            reasons.append(f"{self.tf_name}: Weak/Ranging (ADX {adx:.0f}) — Caution")
+
+        # ──────────────────────────────────────────────
+        # KEPUTUSAN: Confluence Rate, bukan Score Accumulator
+        # ──────────────────────────────────────────────
+        confluence_rate = confluence_count / total_checks  # 0.0 - 1.0
+
+        # VETO conditions (hard stop — tidak boleh trade)
+        if rsi_extreme:
+            signal = "NO_TRADE"
+            reasons.append(f"{self.tf_name}: VETO — RSI Extreme, tunggu pullback")
+        elif not trend_aligned and not momentum_agrees:
+            signal = "NO_TRADE"
+            reasons.append(f"{self.tf_name}: VETO — Trend dan Momentum bertentangan")
+        elif adx < 15:
+            signal = "NO_TRADE"
+            reasons.append(f"{self.tf_name}: VETO — ADX terlalu lemah, market choppy")
+        # Entry conditions: confluence rate >= 60% (3 dari 5 indikator searah)
+        elif confluence_rate >= 0.6:
+            signal = "BULLISH" if trend_aligned else "BEARISH"
         else:
             signal = "NEUTRAL"
-        
+            reasons.append(f"{self.tf_name}: Confluence rendah ({confluence_rate:.0%})")
+
+        # Normalize score ke -3 s/d +3 untuk kompatibilitas dengan MTF
+        score = (confluence_rate - 0.5) * 6  # Map 0-1 ke -3到+3
+        score = max(-3, min(3, score))
+
         return signal, score, reasons
     
     def get_data(self):

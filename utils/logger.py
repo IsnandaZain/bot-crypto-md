@@ -35,12 +35,12 @@ class BotLogger:
         for pos in closed_positions:
             emoji = "🎯" if pos['exit_reason'] == 'TP_HIT' else "🛑"
             pnl_emoji = "📈" if pos['pnl_usdt'] >= 0 else "📉"
-            
+
             print(f"\n{emoji} POSISI DITUTUP: {pos['symbol']}")
             print(f"  Signal: {pos['signal']}")
             print(f"  Entry: ${pos['entry_price']:.6f} → Exit: ${pos['exit_price']:.6f}")
             print(f"  Reason: {pos['exit_reason']}")
-            print(f"  {pnl_emoji} PnL: ${pos['pnl_usdt']:.6f} ({pos['pnl_pct']:.2f}%)")
+            print(f"  {pnl_emoji} PnL: ${pos['pnl_usdt']:+.6f} ({pos['pnl_pct']:+.2f}%)")
             print(f"  Duration: {pos['opened_at']} → {pos['closed_at']}")
     
     @staticmethod
