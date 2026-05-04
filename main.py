@@ -181,15 +181,28 @@ def scan_market():
             print(f"\n🔍 Scanning {symbol}...")
 
             # Cek apakah ada posisi aktif untuk koin ini
-            active_position = tracker.get_active_position(symbol)
+            active_positions = tracker.get_active_positions(symbol)
             existing_signal = None
 
-            if active_position:
-                existing_signal = active_position['signal']
-                opposite_signal = "SHORT" if existing_signal == "LONG" else "LONG"
-                print(f"⚡ Ada posisi aktif: {existing_signal} → Mencari peluang {opposite_signal} saja")
+            # 2. Tentukan arah sinyal yang boleh dicari
+            if not active_positions:
+                print("📍 Tidak ada posisi aktif → Mencari semua peluang")
+                existing_signal = None
             else:
-                print(f"📍 Tidak ada posisi aktif → Mencari semua peluang")
+                active_sides = list(active_positions.keys())
+                
+                if "LONG" in active_sides and "SHORT" not in active_sides:
+                    print("⚡ Ada posisi LONG → Mencari peluang SHORT saja (reversal/close)")
+                    opposite_signal = "SHORT"
+                    existing_signal = "LONG"
+                elif "SHORT" in active_sides and "LONG" not in active_sides:
+                    print("⚡ Ada posisi SHORT → Mencari peluang LONG saja (reversal/close)")
+                    opposite_signal = "LONG"
+                    existing_signal = "SHORT"
+                else:
+                    # Kasus Hedging: kedua sisi terbuka
+                    print("⚡ Posisi LONG & SHORT aktif (Hedging) → Tidak cari entry baru")
+                    continue
 
             # Fetch Multi-TF
             df_dict = fetcher.fetch_multi_timeframe(symbol)
@@ -226,7 +239,7 @@ def scan_market():
             signal_bb, reasons_bb, score_bb = mtf_bb.analyze()
 
             # 🎯 FILTER: Jika ada posisi aktif, hanya terima sinyal berlawanan
-            if active_position:
+            if active_positions:
                 if signal == existing_signal:
                     print(f"⏭️  Skip {signal} (sama dengan posisi aktif {existing_signal})")
                     signal = "NO_TRADE"
@@ -243,7 +256,7 @@ def scan_market():
             print(f"Result BB : {symbol} - {emoji_bb} {signal_bb} | Score : ({score_bb})")
 
             # get risk data
-            risk_data = mtf.get_risk_data()
+            # risk_data = mtf.get_risk_data()
             risk_data_bb = mtf_bb.get_risk_data()
 
             # Calculate Risk Levels

@@ -57,12 +57,16 @@ class PositionTracker:
                 return True
         return False
     
-    def get_active_position(self, symbol):
-        """Ambil detail posisi aktif untuk simbol tertentu"""
+    def get_active_positions(self, symbol):
+        """Kembalikan {'LONG': pos_data, 'SHORT': pos_data} untuk simbol tertentu"""
+        result = {"LONG": None, "SHORT": None}
         for pos in self.positions:
             if pos['symbol'] == symbol and pos['status'] == 'OPEN':
-                return pos
-        return None
+                side = str(pos.get('signal', '')).upper()
+                if side in result:
+                    result[side] = pos
+        # Hapus key yang nilainya None agar bersih
+        return {k: v for k, v in result.items() if v is not None}
     
     def add_position(self, position_info):
         """Tambah posisi baru ke list"""
