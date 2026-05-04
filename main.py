@@ -13,6 +13,8 @@ from utils.file_manager import get_today_folder, create_signal_folder  # ⭐ IMP
 from strategy.mtf_confluence import MTFConfluence
 from strategy.mtf_confluence_bb import MTFConfluenceBB
 
+from strategy.detect_regime_bb import DetecRegimeBB
+
 from indicators.technical import IndicatorCalculator
 from indicators.technical_bb import IndicatorCalculatorBB
 
@@ -211,11 +213,15 @@ def scan_market():
                 continue
 
             # Calculate Indicators
-            ind_calc = IndicatorCalculator(df_dict)
-            df_dict = ind_calc.calculate_all()
-
             ind_calc_bb = IndicatorCalculatorBB(df_dict_bb)
             df_dict_bb = ind_calc_bb.calculate_all()
+
+            # Decide Method to Use (Trend Following / Reversal)
+            detect_regime_bb = DetecRegimeBB(df_dict_bb)
+            regime_bb = detect_regime_bb.detect()
+
+            print(regime_bb)
+            exit(1)
 
             # ⭐ Simpan df_dict ke file TXT untuk inspeksi data (Debug)
             try:
@@ -230,10 +236,6 @@ def scan_market():
             except Exception as e:
                 print(f"⚠️ Gagal menyimpan file debug untuk {symbol}: {e}")
 
-            # Analyze Confluence
-            mtf = MTFConfluence(df_dict, symbol)
-            signal, reasons, score = mtf.analyze()
-
             # Analyze Confluence - BB
             mtf_bb = MTFConfluenceBB(df_dict_bb, symbol)
             signal_bb, reasons_bb, score_bb = mtf_bb.analyze()
@@ -247,10 +249,6 @@ def scan_market():
                     print(f"⏭️  Skip {signal_bb} BB (sama dengan posisi aktif {existing_signal})")
                     signal_bb = "NO_TRADE"
 
-            # add logger
-            emoji = "🟢" if signal == "LONG" else "🔴" if signal == "SHORT" else "⚪"
-            print(f"Result : {symbol} - {emoji} {signal} | Score : ({score})")
-
             # add logger - bb
             emoji_bb = "🟢" if signal_bb == "LONG" else "🔴" if signal_bb == "SHORT" else "⚪"
             print(f"Result BB : {symbol} - {emoji_bb} {signal_bb} | Score : ({score_bb})")
@@ -262,60 +260,6 @@ def scan_market():
             # Calculate Risk Levels
             risk_levels = None
             position_info = None
-
-            if signal not in ["NO_TRADE", "NO TRADE"]:
-                # risk manager
-                rm = RiskManager(
-                    atr=risk_data['atr'],
-                    price=risk_data['price'],
-                    signal=signal,
-                    df_base=risk_data.get('df_base')
-                )
-                risk_levels = rm.calculate_levels()
-
-                # position sizer
-                ps = PositionSizer(account_balance, TRADING_CONFIG['leverage'])
-                position_info = ps.calculate_position(
-                    entry_price=risk_levels['entry'],
-                    stop_loss_price=risk_levels['stop_loss'],
-                    signal=signal
-                )
-
-                # Tambahkan symbol ke position_info
-                position_info['symbol'] = symbol
-                position_info['method'] = risk_levels['method']
-
-                # ⭐ BUAT FOLDER SINYAL & SIMPAN CHART
-                signal_folder = create_signal_folder(
-                    pair=symbol.replace('/', '').replace(':', ''),
-                    signal_type=signal,
-                    base_folder=today_folder
-                )
-
-                # Simpan chart dari semua timeframe
-                mtf.save_signal_charts(signal_folder)
-                
-                # ⭐ SIMPAN DETAIL SINYAL KE TXT
-                save_signal_details(
-                    signal_folder=signal_folder,
-                    symbol=symbol,
-                    signal_type=signal,
-                    risk_data=risk_levels,
-                    position_data=position_info,
-                    reasons=reasons,
-                    method=risk_levels.get('method', 'EMA')
-                )
-
-                # Tambahkan ke tracker
-                tracker.add_position(position_info)
-                new_signals.append({
-                    'symbol': symbol,
-                    'signal': signal,
-                    'reasons': reasons,
-                    'risk': risk_levels,
-                    'position': position_info,
-                    'chart_folder': signal_folder  # ⭐ TAMBAHKAN INFO FOLDER
-                })
 
             if signal_bb not in ["NO_TRADE", "NO TRADE"]:
                 # risk manager - bb
