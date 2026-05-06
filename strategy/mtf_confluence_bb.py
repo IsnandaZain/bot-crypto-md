@@ -51,6 +51,89 @@ class MTFConfluenceBB:
 
         return signal, reasons, total_score
     
+    def analyze_reversal(self):
+        """
+        Agregator Multi-Timeframe khusus untuk SETUP REVERSAL.
+        Logika berbeda dari Trend-Following:
+        - HTF (1H) = Konteks & Filter Keamanan (bukan komandan arah)
+        - LTF (15m) = Pemicu Entry & Konfirmasi Price Action
+        - LTF trigger duluan = VALID (Early Reversal)
+        - Threshold lebih ketat karena sifat counter-trend
+        """
+        # 1. Ambil hasil analisis reversal per timeframe
+        h1_sig, h1_score, h1_reasons = self.base_se.analyze_reversal()
+        m15_sig, m15_score, m15_reasons = self.lower_se.analyze_reversal()
+        reasons = h1_reasons + m15_reasons
+
+        total_score = 0.0
+        final_signal = "NO TRADE"
+
+        # 2. 🛡️ FILTER KEAMANAN: HTF ADX (Hard VETO)
+        # Reversal melawan tren kuat = risiko tinggi. ADX > 30 di 1H = hindari.
+        adx_1h = self.base_se.df.iloc[-2].get('adx', 0)
+        if adx_1h > 30:
+            return "NO TRADE", reasons + [f"🚫 HTF ADX VETO ({adx_1h:.0f} > 30) — Tren terlalu kuat untuk reversal"], round(total_score, 2)
+
+        # ──────────────────────────────────────────────
+        # SKENARIO A: KONFLUENSI PENUH (HTF & LTF SEARAH)
+        # Probabilitas tertinggi, risiko terkontrol
+        # ──────────────────────────────────────────────
+        if h1_sig in ("LONG", "SHORT") and m15_sig == h1_sig:
+            # Weighting seimbang karena keduanya sudah konfirmasi exhaustion + turn
+            total_score = (h1_score * 0.5) + (m15_score * 0.5)
+
+            if abs(total_score) >= 1.3:
+                final_signal = h1_sig
+                reasons.append("🔥 MTF CONFLUENCE: HTF & LTF Reversal Aligned")
+            elif abs(total_score) >= 1.0:
+                final_signal = "WATCH"
+                reasons.append("⏳ STRONG SETUP: Wait for candle close to confirm")
+
+        # ──────────────────────────────────────────────
+        # SKENARIO B: EARLY REVERSAL (LTF Trigger, HTF Neutral/Context)
+        # Sangat umum: LTF jenuh & berbalik duluan, HTF masih di zona ekstrem/ranging
+        # ──────────────────────────────────────────────
+        elif m15_sig in ("LONG", "SHORT") and h1_sig == "NEUTRAL":
+            # Cek apakah HTF sebenarnya di zona ekstrem (belum trigger karena close/wick)
+            prev_h1 = self.base_se.df.iloc[-2]
+            h1_at_extreme = (
+                (m15_sig == "SHORT" and prev_h1['high'] >= prev_h1['bb_upper']) or
+                (m15_sig == "LONG" and prev_h1['low'] <= prev_h1['bb_lower'])
+            )
+
+            if h1_at_extreme or adx_1h < 20:
+                # Favor LTF karena dia yang trigger duluan & timing entry lebih presisi
+                total_score = (h1_score * 0.3) + (m15_score * 0.7)
+
+                if abs(total_score) >= 1.2:
+                    final_signal = m15_sig
+                    reasons.append("⚡ EARLY ENTRY: LTF Reversal Trigger + HTF Context Valid")
+                else:
+                    final_signal = "WATCH"
+                    reasons.append("👀 FORMING: LTF showing signs, wait for HTF follow-through")
+
+        # ──────────────────────────────────────────────
+        # SKENARIO C: DIVERGENSI / TIMING MISMATCH
+        # HTF reversal SHORT, tapi LTF masih LONG (pullback kecil) atau sebaliknya
+        # Dalam reversal, ini berarti "belum waktunya" atau "salah timing"
+        # ──────────────────────────────────────────────
+        elif h1_sig in ("LONG", "SHORT") and m15_sig in ("LONG", "SHORT") and h1_sig != m15_sig:
+            return "NO TRADE", reasons + ["⚠️ TIMING MISMATCH — HTF & LTF conflict. Wait for alignment."], round(total_score, 2)
+
+        # ──────────────────────────────────────────────
+        # SKENARIO D: TIDAK ADA TRIGGER
+        # ──────────────────────────────────────────────
+        else:
+            return "NO TRADE", reasons + ["No valid reversal setup detected across MTF"], round(total_score, 2)
+
+        # 3. 🎯 THRESHOLD FINAL & OUTPUT
+        if final_signal == "NO TRADE" and abs(total_score) < 0.8:
+            reasons.append(f"📉 Confluence rendah (score: {total_score:.2f}, butuh ≥1.2)")
+        elif final_signal == "WATCH":
+            reasons.append(f"📊 Score {total_score:.2f} — Monitor, jangan entry dulu")
+
+        return final_signal, reasons, round(total_score, 2)
+    
     def get_risk_data(self):
         """Ambil data risiko dari Base TF (1h)"""
         base_data = self.base_se.get_data()

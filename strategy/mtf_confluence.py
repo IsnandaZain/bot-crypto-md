@@ -28,24 +28,6 @@ class MTFConfluence:
         total_score = (base_score * 0.6) + (lower_score * 0.4)
 
         # VETO HIERARCHY — Hard rules
-        # 1. Jika 4h NEUTRAL/NO_TRADE → veto semua
-        # if higher_signal in ("NEUTRAL", "NO_TRADE"):
-        #     signal = "NO TRADE"
-        #     reasons.append("4h VETO — Trend tidak jelas di higher TF")
-        #     return signal, reasons, total_score
-
-        # # 2. Jika 4h dan 1h BERLAWANAN → veto
-        # if (higher_score > 0 and base_score < 0) or (higher_score < 0 and base_score > 0):
-        #     signal = "NO TRADE"
-        #     reasons.append("HTF DIVERGENCE — 4h dan 1h berlawanan arah")
-        #     return signal, reasons, total_score
-
-        # # 3. Jika 15m berlawanan → warning tapi bisa trade jika HTF kuat
-        # if (higher_score > 0 and lower_score < -1) or (higher_score < 0 and lower_score > 1):
-        #     reasons.append("LTF DIVERGENCE — 15m berlawanan, entry harus hati-hati")
-        #     total_score *= 0.7  # Penalty 30%
-            # Pastikan total_score hanya menjumlahkan 2 TF yang aktif  
-
         # 1. VETO jika Higher TF (1H) tidak memiliki tren jelas
         if base_signal in ("NEUTRAL", "NO_TRADE"):
             signal = "NO TRADE"

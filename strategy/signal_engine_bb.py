@@ -19,36 +19,51 @@ class SignalEngineBB:
     
     def analyze(self):
         """Analisis teknikal BB untuk satu timeframe — Confluence-based, bukan scoring arbitrer"""
-        if self.df.empty:
-            return "NEUTRAL", 0, []
+        if self.df.empty or len(self.df) < 5:
+            return "NEUTRAL", 0, [f"{self.tf_name}: Not enough data"]
 
-        row = self.df.iloc[-1]       # forming candle (belum close)
-        prev = self.df.iloc[-2]      # closed candle (sudah close) ← SINYAL UTAMA
-        prev2 = self.df.iloc[-3]     # previous closed candle untuk MACD change
+        row   = self.df.iloc[-1]     # forming candle (belum close)
+        prev  = self.df.iloc[-2]     # closed candle (sudah close) ← SINYAL UTAMA
+        prev2 = self.df.iloc[-3]     # previous closed candle untuk MACD/RSI change
+        prev3 = self.df.iloc[-4]     # 3 candle lalu untuk konfirmasi trend bias
         reasons = []
         confluence_points = 0
         max_possible_points = 4.5 # 1(BB+SR) + 1(RSI) + 1(MACD) + 0.5(Volume)
 
         # ──────────────────────────────────────────────
         # 1. TREND BIAS (BB Mid) — Filter Utama
+        # Minimal 2 dari 3 closed candle harus di sisi yang sama
         # ──────────────────────────────────────────────
-        trend_bullish = prev['close'] > prev['bb_mid']
-        trend_bearish = prev['close'] < prev['bb_mid']
+        above_mid_count = sum([
+            prev['close']  > prev['bb_mid'],
+            prev2['close'] > prev2['bb_mid'],
+            prev3['close'] > prev3['bb_mid'],
+        ])
+        trend_bullish = above_mid_count >= 2
+        trend_bearish = not trend_bullish
 
-        if not trend_bullish and not trend_bearish:
-            return "NEUTRAL", 0, [f"{self.tf_name}: VETO — Price at BB Mid, unclear bias"]
-        
         direction = 1 if trend_bullish else -1
+        confirmed_count = above_mid_count if trend_bullish else (3 - above_mid_count)
         bias_text = "Above" if trend_bullish else "Below"
-        reasons.append(f"{self.tf_name}: Price {bias_text} BB Mid (closed)")
+        reasons.append(f"{self.tf_name}: Price {bias_text} BB Mid ({confirmed_count}/3 candles)")
 
         # ──────────────────────────────────────────────
         # 2. BB TOUCH + S/R CONFIRMATION 
         # ──────────────────────────────────────────────
         long_bb = prev['low'] <= prev['bb_lower']    # Closed candle pernah sentuh bb_lower
         short_bb = prev['high'] >= prev['bb_upper']  # Closed candle pernah sentuh bb_upper
-        long_sr = prev.get('is_sup', 0) or abs(prev['close'] - prev['low'])/prev['close'] < self.tolerance
-        short_sr = prev.get('is_res', 0) or abs(prev['close'] - prev['high'])/prev['close'] < self.tolerance
+        nearest_sup = prev.get('nearest_support', float('nan'))
+        nearest_res = prev.get('nearest_resistance', float('nan'))
+
+        if not pd.isna(nearest_sup):
+            long_sr = abs(prev['close'] - nearest_sup) / prev['close'] < self.tolerance
+        else:
+            long_sr = bool(prev.get('is_sup', 0)) or abs(prev['close'] - prev['low']) / prev['close'] < self.tolerance
+
+        if not pd.isna(nearest_res):
+            short_sr = abs(prev['close'] - nearest_res) / prev['close'] < self.tolerance
+        else:
+            short_sr = bool(prev.get('is_res', 0)) or abs(prev['close'] - prev['high']) / prev['close'] < self.tolerance
 
         if (trend_bullish and long_bb and long_sr) or (trend_bearish and short_bb and short_sr):
             confluence_points += 1
@@ -61,38 +76,51 @@ class SignalEngineBB:
         # ──────────────────────────────────────────────
         # 3. RSI MOMENTUM — Harus SEARAH dengan bias
         # ──────────────────────────────────────────────
-        rsi_val = prev['rsi']
-        rsi_ok = (trend_bullish and 45 < rsi_val < 70) or (trend_bearish and 30 < rsi_val < 55)
-        
+        rsi_val     = prev['rsi']
+        rsi_rising  = prev['rsi'] > prev2['rsi']
+        rsi_falling = prev['rsi'] < prev2['rsi']
+        rsi_ok = (trend_bullish and 45 < rsi_val < 70 and rsi_rising) or \
+                 (trend_bearish and 30 < rsi_val < 55 and rsi_falling)
+
         if rsi_ok:
             confluence_points += 1
-            reasons.append(f"{self.tf_name}: RSI Agrees ({rsi_val:.0f})")
+            dir_txt = "rising" if trend_bullish else "falling"
+            reasons.append(f"{self.tf_name}: RSI Agrees ({rsi_val:.0f}, {dir_txt})")
         elif rsi_val >= 70:
             reasons.append(f"{self.tf_name}: RSI Overbought ({rsi_val:.0f}) — Reversal Risk")
         elif rsi_val <= 30:
             reasons.append(f"{self.tf_name}: RSI Oversold ({rsi_val:.0f}) — Reversal Risk")
+        elif not (rsi_rising if trend_bullish else rsi_falling):
+            reasons.append(f"{self.tf_name}: RSI Wrong Direction ({rsi_val:.0f})")
         else:
             reasons.append(f"{self.tf_name}: RSI Neutral ({rsi_val:.0f})")
 
         # ──────────────────────────────────────────────
         # 4. MACD HISTOGRAM — Momentum Confirmation
         # ──────────────────────────────────────────────
-        macd_inc = prev['macd_hist'] > prev2['macd_hist']
-        macd_ok = (trend_bullish and macd_inc) or (trend_bearish and not macd_inc)
-        
+        macd_positive = prev['macd_hist'] > 0
+        macd_inc      = prev['macd_hist'] > prev2['macd_hist']
+        macd_ok = (trend_bullish and macd_positive and macd_inc) or \
+                  (trend_bearish and not macd_positive and not macd_inc)
+
         if macd_ok:
             confluence_points += 1
-            reasons.append(f"{self.tf_name}: MACD Momentum Agrees")
+            reasons.append(f"{self.tf_name}: MACD Momentum Agrees ({prev['macd_hist']:.4f})")
+        elif (trend_bullish and macd_inc) or (trend_bearish and not macd_inc):
+            reasons.append(f"{self.tf_name}: MACD Direction OK but Wrong Side of Zero ({prev['macd_hist']:.4f})")
         else:
-            reasons.append(f"{self.tf_name}: MACD Diverges")
+            reasons.append(f"{self.tf_name}: MACD Diverges ({prev['macd_hist']:.4f})")
 
         # ──────────────────────────────────────────────
         # 5. VOLUME — Confirmation
         # ──────────────────────────────────────────────
         vol_ratio = prev['volume'] / prev['vol_ma']
-        if vol_ratio > 1.2:
+        if vol_ratio >= 1.5:
             confluence_points += 0.5
             reasons.append(f"{self.tf_name}: Volume Strong ({vol_ratio:.1f}x)")
+        elif vol_ratio >= 1.0:
+            confluence_points += 0.25
+            reasons.append(f"{self.tf_name}: Volume Moderate ({vol_ratio:.1f}x)")
         else:
             reasons.append(f"{self.tf_name}: Volume Weak ({vol_ratio:.1f}x)")
 
@@ -127,29 +155,30 @@ class SignalEngineBB:
     
     def analyze_reversal(self):
         """Analisis teknikal BB untuk sinyal REVERSAL — Mean Reversion & Exhaustion"""
-        if self.df.empty:
-            return "NEUTRAL", 0, []
+        if self.df.empty or len(self.df) < 5:
+            return "NEUTRAL", 0, [f"{self.tf_name}: Not enough data"]
 
-        row = self.df.iloc[-1]       # forming candle
-        prev = self.df.iloc[-2]      # closed candle ← SINYAL UTAMA
+        row   = self.df.iloc[-1]     # forming candle
+        prev  = self.df.iloc[-2]     # closed candle ← SINYAL UTAMA
         prev2 = self.df.iloc[-3]     # previous closed candle
+        prev3 = self.df.iloc[-4]     # untuk 2-candle RSI confirmation
         reasons = []
         confluence_points = 0
-        max_possible_points = 4.5    # 1(BB+SR) + 1(RSI) + 1(MACD) + 0.5(Volume)
+        max_possible_points = 4.5    # 1(BB+SR) + 1(RSI) + 1(MACD) + 0.5(Volume) + 0.25(Wick)
 
         # ──────────────────────────────────────────────
         # 🛡️ ADX FILTER (Opsional tapi Direkomendasikan)
         # ──────────────────────────────────────────────
         adx_val = prev['adx']
         
-        if adx_val > 35:
+        if adx_val > 28:
             return "NEUTRAL", 0, [
-                f"{self.tf_name}: VETO — ADX {adx_val:.0f} > {35}, strong trend"
+                f"{self.tf_name}: VETO — ADX {adx_val:.0f} > 28, trend too strong for reversal"
             ]
-        
+
         if adx_val < 15:
             reasons.append(f"{self.tf_name}: ADX low ({adx_val:.0f}), ranging market ✅")
-        elif adx_val < 25:
+        elif adx_val < 20:
             reasons.append(f"{self.tf_name}: ADX moderate ({adx_val:.0f}), cautious ✅")
         else:
             reasons.append(f"{self.tf_name}: ADX elevated ({adx_val:.0f}), higher risk ⚠️")
@@ -170,11 +199,20 @@ class SignalEngineBB:
         # ──────────────────────────────────────────────
         # 2. LOCATION: S/R ALIGNMENT
         # ──────────────────────────────────────────────
+        nearest_sup = prev.get('nearest_support', float('nan'))
+        nearest_res = prev.get('nearest_resistance', float('nan'))
+
         sr_hit = False
         if at_upper:
-            sr_hit = prev.get('is_res', 0) or abs(prev['close'] - prev['high'])/prev['close'] < self.tolerance
+            if not pd.isna(nearest_res):
+                sr_hit = abs(prev['close'] - nearest_res) / prev['close'] < self.tolerance
+            if not sr_hit:
+                sr_hit = bool(prev.get('is_res', 0)) or abs(prev['close'] - prev['high']) / prev['close'] < self.tolerance
         else:
-            sr_hit = prev.get('is_sup', 0) or abs(prev['close'] - prev['low'])/prev['close'] < self.tolerance
+            if not pd.isna(nearest_sup):
+                sr_hit = abs(prev['close'] - nearest_sup) / prev['close'] < self.tolerance
+            if not sr_hit:
+                sr_hit = bool(prev.get('is_sup', 0)) or abs(prev['close'] - prev['low']) / prev['close'] < self.tolerance
 
         if sr_hit:
             confluence_points += 1.0
@@ -187,27 +225,34 @@ class SignalEngineBB:
         # ──────────────────────────────────────────────
         rsi_val = prev['rsi']
         rsi_extreme = (at_upper and rsi_val > 70) or (at_lower and rsi_val < 30)
-        # RSI harus sudah mulai berbalik (rolling back), bukan masih mendorong ekstrem
-        rsi_rolling = (at_upper and rsi_val < prev2['rsi']) or (at_lower and rsi_val > prev2['rsi'])
+        # Perlu 2 candle konfirmasi arah balik (bukan hanya 1 candle dip)
+        rsi_rolling = (at_upper and prev['rsi'] < prev2['rsi'] and prev2['rsi'] < prev3['rsi']) or \
+                      (at_lower and prev['rsi'] > prev2['rsi'] and prev2['rsi'] > prev3['rsi'])
 
         if rsi_extreme and rsi_rolling:
             confluence_points += 1.0
-            reasons.append(f"{self.tf_name}: RSI Exhausted & Rolling Back ({rsi_val:.0f})")
+            reasons.append(f"{self.tf_name}: RSI Exhausted & Rolling Back 2 candles ({rsi_val:.0f})")
+        elif rsi_extreme and ((at_upper and prev['rsi'] < prev2['rsi']) or (at_lower and prev['rsi'] > prev2['rsi'])):
+            reasons.append(f"{self.tf_name}: RSI Extreme, 1-candle turn only — wait confirm ({rsi_val:.0f})")
         elif rsi_extreme:
-            reasons.append(f"{self.tf_name}: RSI Extreme but Still Pushing (Risk)")
+            reasons.append(f"{self.tf_name}: RSI Extreme but Still Pushing (Risk) ({rsi_val:.0f})")
         else:
             reasons.append(f"{self.tf_name}: RSI Not Extreme ({rsi_val:.0f})")
 
         # ──────────────────────────────────────────────
         # 4. MOMENTUM FADE: MACD HISTOGRAM
         # ──────────────────────────────────────────────
-        # Reversal membutuhkan pelemahan momentum searah ekstrem
-        macd_fading = (at_upper and prev['macd_hist'] < prev2['macd_hist']) or \
-                      (at_lower and prev['macd_hist'] > prev2['macd_hist'])
+        # Reversal membutuhkan pelemahan momentum — arah DAN nilai absolut mengecil
+        hist_weakening = abs(prev['macd_hist']) < abs(prev2['macd_hist'])
+        macd_fading = ((at_upper and prev['macd_hist'] < prev2['macd_hist'] and hist_weakening) or
+                       (at_lower and prev['macd_hist'] > prev2['macd_hist'] and hist_weakening))
 
         if macd_fading:
             confluence_points += 1.0
-            reasons.append(f"{self.tf_name}: MACD Momentum Fading")
+            reasons.append(f"{self.tf_name}: MACD Momentum Fading (weakening)")
+        elif (at_upper and prev['macd_hist'] < prev2['macd_hist']) or \
+             (at_lower and prev['macd_hist'] > prev2['macd_hist']):
+            reasons.append(f"{self.tf_name}: MACD Direction Fading but Magnitude Growing")
         else:
             reasons.append(f"{self.tf_name}: MACD Still Expanding (Trend May Continue)")
 
@@ -215,10 +260,13 @@ class SignalEngineBB:
         # 5. PARTICIPATION: VOLUME CLIMAX
         # ──────────────────────────────────────────────
         vol_ratio = prev['volume'] / prev['vol_ma']
-        # Volume tinggi di ekstrem sering menandakan climax/exhaustion, bukan kelanjutan
-        if vol_ratio > 1.3:
+        # Volume climax di ekstrem — semakin tinggi, semakin kuat sinyal exhaustion
+        if vol_ratio >= 2.0:
             confluence_points += 0.5
-            reasons.append(f"{self.tf_name}: Volume Climax ({vol_ratio:.1f}x)")
+            reasons.append(f"{self.tf_name}: Volume Climax ({vol_ratio:.1f}x) ✅")
+        elif vol_ratio >= 1.5:
+            confluence_points += 0.25
+            reasons.append(f"{self.tf_name}: Volume Elevated ({vol_ratio:.1f}x) ⚠️")
         else:
             reasons.append(f"{self.tf_name}: Volume Normal ({vol_ratio:.1f}x)")
 
@@ -236,7 +284,8 @@ class SignalEngineBB:
 
             rejection = (at_upper and upper_wick_pct > 0.4) or (at_lower and lower_wick_pct > 0.4)
             if rejection:
-                reasons.append(f"{self.tf_name}: Forming candle shows strong rejection wick")
+                confluence_points += 0.25
+                reasons.append(f"{self.tf_name}: Forming candle shows strong rejection wick ✅")
 
         # ──────────────────────────────────────────────
         # VETO & DECISION
