@@ -48,6 +48,43 @@ class SignalEngineBB:
         reasons.append(f"{self.tf_name}: Price {bias_text} BB Mid ({confirmed_count}/3 candles)")
 
         # ──────────────────────────────────────────────
+        # 1b. PRIOR MOMENTUM CONTEXT (Lookback 5 Candles)
+        # Deteksi apakah sinyal saat ini genuine trend atau hanya pullback sesaat.
+        # Kasus: harga baru saja rally kuat (5 candle lalu mayoritas bullish),
+        # lalu turun ke bawah BB Mid → ini PULLBACK, bukan downtrend sejati.
+        # VETO hanya aktif jika bias lemah (2/3) + ada counter-swing signifikan (>1.5%).
+        # Jika bias kuat (3/3), hanya tambahkan catatan peringatan.
+        # ──────────────────────────────────────────────
+        if len(self.df) >= 10:
+            prior = self.df.iloc[-9:-4]  # 5 candle sebelum window bias (prev4 s/d prev8)
+            prior_above_count = int(sum(prior['close'] > prior['bb_mid']))
+            prior_below_count = 5 - prior_above_count
+
+            # Konflik: tren sekarang bearish tapi sebelumnya bullish, atau sebaliknya
+            prior_conflict = (trend_bearish and prior_above_count >= 3) or \
+                             (trend_bullish and prior_below_count >= 3)
+
+            if prior_conflict:
+                swing_high = prior['high'].max()
+                swing_low  = prior['low'].min()
+                price_swing = (swing_high - swing_low) / swing_low if swing_low > 0 else 0
+                swing_dir   = "Bullish Rally" if trend_bearish else "Bearish Drop"
+                prior_opp   = prior_above_count if trend_bearish else prior_below_count
+
+                if confirmed_count == 2 and price_swing > 0.015:
+                    # Bias lemah + ada counter-swing >1.5% → kemungkinan besar hanya pullback
+                    reasons.append(
+                        f"{self.tf_name}: ⚠️ PULLBACK VETO — Prior {swing_dir} {price_swing:.1%} "
+                        f"({prior_opp}/5 candles sebelumnya berlawanan), bias terlalu lemah (2/3)"
+                    )
+                    return "NEUTRAL", 0, reasons
+                else:
+                    reasons.append(
+                        f"{self.tf_name}: Prior {swing_dir} noted ({price_swing:.1%}), "
+                        f"bias kuat (3/3) — lanjut analisis"
+                    )
+
+        # ──────────────────────────────────────────────
         # 2. BB TOUCH + S/R CONFIRMATION 
         # ──────────────────────────────────────────────
         long_bb = prev['low'] <= prev['bb_lower']    # Closed candle pernah sentuh bb_lower
@@ -195,6 +232,46 @@ class SignalEngineBB:
         direction = -1 if at_upper else 1
         bias_text = "Upper Band (Short Bias)" if at_upper else "Lower Band (Long Bias)"
         reasons.append(f"{self.tf_name}: Price at {bias_text}")
+
+        # ──────────────────────────────────────────────
+        # 1b. PRIOR MOMENTUM CONTEXT (Lookback 5 Candles)
+        # Reversal valid hanya jika harga SUDAH trending ke arah ekstrem sebelumnya.
+        # Jika BB Upper/Lower disentuh tiba-tiba tanpa prior trend = SPIKE, bukan EXHAUSTION.
+        # Contoh: harga naik mendadak ke BB Upper padahal 5 candle sebelumnya bearish
+        #         → bukan uptrend yang exhausted, melainkan news spike → reversal berisiko tinggi.
+        # Kebalikan dari analyze(): di sini conflict = prior berlawanan dengan ARAH MENUJU ekstrem.
+        # ──────────────────────────────────────────────
+        if len(self.df) >= 10:
+            prior = self.df.iloc[-9:-4]  # 5 candle sebelum window trigger (prev4 s/d prev8)
+            prior_above_count = int(sum(prior['close'] > prior['bb_mid']))
+            prior_below_count = 5 - prior_above_count
+
+            swing_high  = prior['high'].max()
+            swing_low   = prior['low'].min()
+            price_swing = (swing_high - swing_low) / swing_low if swing_low > 0 else 0
+
+            # at_upper: seharusnya prior bullish (uptrend → exhaustion di atas)
+            # → conflict jika prior justru bearish (>= 3 candle di bawah BB Mid)
+            # at_lower: seharusnya prior bearish (downtrend → exhaustion di bawah)
+            # → conflict jika prior justru bullish (>= 3 candle di atas BB Mid)
+            prior_conflict = (at_upper and prior_below_count >= 3) or \
+                             (at_lower and prior_above_count >= 3)
+
+            if prior_conflict and price_swing > 0.015:
+                spike_dir = "Upward Spike" if at_upper else "Downward Spike"
+                prior_opp = prior_below_count if at_upper else prior_above_count
+                reasons.append(
+                    f"{self.tf_name}: ⚠️ SPIKE VETO — {spike_dir} tanpa prior trend "
+                    f"({prior_opp}/5 candle sebelumnya berlawanan, swing {price_swing:.1%}) "
+                    f"— bukan exhaustion sejati"
+                )
+                return "NEUTRAL", 0, reasons
+            elif prior_conflict:
+                spike_dir = "Upward" if at_upper else "Downward"
+                reasons.append(
+                    f"{self.tf_name}: ⚠️ Prior context lemah untuk reversal "
+                    f"({spike_dir} tanpa strong prior trend, swing {price_swing:.1%}) — proceed cautiously"
+                )
 
         # ──────────────────────────────────────────────
         # 2. LOCATION: S/R ALIGNMENT

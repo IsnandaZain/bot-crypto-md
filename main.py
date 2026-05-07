@@ -13,7 +13,7 @@ from utils.file_manager import get_today_folder, create_signal_folder  # ⭐ IMP
 from strategy.mtf_confluence import MTFConfluence
 from strategy.mtf_confluence_bb import MTFConfluenceBB
 
-from strategy.detect_regime_bb import DetecRegimeBB
+from strategy.detect_regime_bb import DetectRegimeBB
 
 from indicators.technical import IndicatorCalculator
 from indicators.technical_bb import IndicatorCalculatorBB
@@ -23,7 +23,7 @@ from datetime import datetime
 import os
 
 
-def save_signal_details(signal_folder: str, symbol: str, signal_type: str, risk_data: dict, position_data: dict, reasons: list, method: str = "Unknown"):
+def save_signal_details(signal_folder: str, symbol: str, signal_type: str, risk_data: dict, position_data: dict, reasons: list, regime: str, method: str = "Unknown"):
     """
     Simpan detail sinyal ke file TXT dalam folder sinyal.
     
@@ -58,6 +58,7 @@ def save_signal_details(signal_folder: str, symbol: str, signal_type: str, risk_
 
 📌 Symbol        : {symbol}
 📌 Signal Type   : {signal_type}
+📌 Regime        : {regime}
 📌 Method        : {method}
 📌 Generated At  : {timestamp}
 
@@ -217,11 +218,9 @@ def scan_market():
             df_dict_bb = ind_calc_bb.calculate_all()
 
             # Decide Method to Use (Trend Following / Reversal)
-            detect_regime_bb = DetecRegimeBB(df_dict_bb)
+            detect_regime_bb = DetectRegimeBB(df_dict_bb)
             regime_bb = detect_regime_bb.detect()
-
-            print(regime_bb)
-            exit(1)
+            print(f"✅ Regime {regime_bb} used")
 
             # ⭐ Simpan df_dict ke file TXT untuk inspeksi data (Debug)
             try:
@@ -238,13 +237,19 @@ def scan_market():
 
             # Analyze Confluence - BB
             mtf_bb = MTFConfluenceBB(df_dict_bb, symbol)
-            signal_bb, reasons_bb, score_bb = mtf_bb.analyze()
-
+            if regime_bb == "TREND_FOLLOWING":
+                signal_bb, reasons_bb, score_bb = mtf_bb.analyze()
+            elif regime_bb == "REVERSAL":
+                signal_bb, reasons_bb, score_bb = mtf_bb.analyze_reversal()
+            else:
+                print(f"⚠️ Regime {regime_bb} wait n see")
+                continue
+            
             # 🎯 FILTER: Jika ada posisi aktif, hanya terima sinyal berlawanan
             if active_positions:
-                if signal == existing_signal:
-                    print(f"⏭️  Skip {signal} (sama dengan posisi aktif {existing_signal})")
-                    signal = "NO_TRADE"
+                # if signal == existing_signal:
+                #     print(f"⏭️  Skip {signal} (sama dengan posisi aktif {existing_signal})")
+                #     signal = "NO_TRADE"
                 if signal_bb == existing_signal:
                     print(f"⏭️  Skip {signal_bb} BB (sama dengan posisi aktif {existing_signal})")
                     signal_bb = "NO_TRADE"
@@ -257,11 +262,7 @@ def scan_market():
             # risk_data = mtf.get_risk_data()
             risk_data_bb = mtf_bb.get_risk_data()
 
-            # Calculate Risk Levels
-            risk_levels = None
-            position_info = None
-
-            if signal_bb not in ["NO_TRADE", "NO TRADE"]:
+            if signal_bb not in ["NO_TRADE", "NO TRADE", "WATCH"]:
                 # risk manager - bb
                 rm_bb = RiskManager(
                     atr=risk_data_bb['atr'],
@@ -301,6 +302,7 @@ def scan_market():
                     risk_data=risk_levels_bb,
                     position_data=position_info_bb,
                     reasons=reasons_bb,
+                    regime=regime_bb,
                     method=risk_levels_bb.get('method', 'BB')
                 )
 
