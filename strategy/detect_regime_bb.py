@@ -28,11 +28,11 @@ class DetectRegimeBB:
         bb_expanding   = bb_width > bb_width_prev > bb_width_prev2
         bb_contracting = bb_width < bb_width_prev < bb_width_prev2
 
-        rsi_extreme = rsi > 70 or rsi < 30
+        rsi_extreme = rsi >= 70 or rsi <= 30
 
         # 1. TRENDING KUAT
         # ADX kuat + BB tidak menyempit tiba-tiba + RSI di zona wajar
-        if adx > 25 and not bb_contracting and (45 < rsi < 70 or 30 < rsi < 50):
+        if adx > 25 and not bb_contracting and (45 < rsi <= 70 or 30 <= rsi < 50):
             return "TREND_FOLLOWING"
 
         # 2. RANGING / SIDEWAYS

@@ -25,6 +25,11 @@ class IndicatorCalculatorBB:
             df_copy['bb_mid'] = bb.iloc[:, 1]   # BBM
             df_copy['bb_lower'] = bb.iloc[:, 0] # BBL
 
+            # BB %B — posisi close relatif terhadap band (0.0=lower, 0.5=mid, 1.0=upper)
+            # Digunakan untuk near-touch detection tanpa bergantung pada wick
+            band_width = (df_copy['bb_upper'] - df_copy['bb_lower']).replace(0, float('nan'))
+            df_copy['bb_pct_b'] = (df_copy['close'] - df_copy['bb_lower']) / band_width
+
             # RSI
             df_copy['rsi'] = ta.rsi(df_copy['close'], length=cfg['rsi_period'])
 

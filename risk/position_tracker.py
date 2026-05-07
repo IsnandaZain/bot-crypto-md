@@ -84,13 +84,74 @@ class PositionTracker:
             'status': 'OPEN',
             'method': position_info.get('method', 'Unknown'),
             'unrealized_pnl': 0,
-            'unrealized_pnl_pct': 0
+            'unrealized_pnl_pct': 0,
+            'breakeven_triggered': False
         }
         
         self.positions.append(new_position)
         self.save_positions()
         print(f"✅ Posisi baru ditambahkan: {new_position['symbol']} {new_position['signal']}")
     
+    def update_breakeven_sl(self, current_prices):
+        """
+        Geser SL ke breakeven (entry + buffer fee) saat posisi sudah
+        mencapai profit threshold tertentu.
+
+        Dipanggil setiap scan cycle sebelum check_tp_sl().
+        Hanya aktif sekali per posisi (field 'breakeven_triggered').
+
+        Threshold: unrealized_pnl_pct >= breakeven_profit_trigger_pct
+        Buffer   : entry × breakeven_fee_buffer (untuk cover biaya penutupan)
+        """
+        from config import RISK_CONFIG
+
+        trigger_pct = RISK_CONFIG.get('breakeven_profit_trigger_pct', 30)
+        fee_buffer  = RISK_CONFIG.get('breakeven_fee_buffer', 0.0012)
+
+        updated = []
+
+        for pos in self.positions:
+            if pos['status'] != 'OPEN':
+                continue
+            if pos.get('breakeven_triggered', False):
+                continue
+            if pos['symbol'] not in current_prices:
+                continue
+
+            if pos['unrealized_pnl_pct'] >= trigger_pct:
+                entry      = pos['entry_price']
+                signal     = pos['signal']
+                fee_amount = entry * fee_buffer
+
+                # LONG: SL naik ke entry + buffer (pastikan tidak rugi setelah fee)
+                # SHORT: SL turun ke entry - buffer
+                if signal == 'LONG':
+                    new_sl = entry + fee_amount
+                    # Pastikan SL baru lebih tinggi dari SL lama (tidak mundur)
+                    if new_sl <= pos['stop_loss']:
+                        continue
+                else:  # SHORT
+                    new_sl = entry - fee_amount
+                    # Pastikan SL baru lebih rendah dari SL lama (tidak mundur)
+                    if new_sl >= pos['stop_loss']:
+                        continue
+
+                old_sl = pos['stop_loss']
+                pos['stop_loss']           = new_sl
+                pos['breakeven_triggered'] = True
+
+                updated.append(pos['symbol'])
+                print(
+                    f"🔒 BREAKEVEN SL: {pos['symbol']} {signal} "
+                    f"| Profit {pos['unrealized_pnl_pct']:.1f}% ≥ {trigger_pct}% "
+                    f"| SL {old_sl:.6f} → {new_sl:.6f} (entry±fee)"
+                )
+
+        if updated:
+            self.save_positions()
+
+        return updated
+
     def check_tp_sl(self, current_prices):
         """
         Cek semua posisi aktif apakah kena TP atau SL

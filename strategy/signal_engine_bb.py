@@ -85,10 +85,26 @@ class SignalEngineBB:
                     )
 
         # ──────────────────────────────────────────────
-        # 2. BB TOUCH + S/R CONFIRMATION 
+        # 2. BB TOUCH + S/R CONFIRMATION (Two-Tier)
+        # Tier 1 — Strict: wick menyentuh/melewati band       → poin penuh
+        # Tier 2 — Near  : close di 20% terluar band (%B)     → poin parsial
+        # Threshold %B: ≤ 0.20 (dekat lower) / ≥ 0.80 (dekat upper)
         # ──────────────────────────────────────────────
-        long_bb = prev['low'] <= prev['bb_lower']    # Closed candle pernah sentuh bb_lower
-        short_bb = prev['high'] >= prev['bb_upper']  # Closed candle pernah sentuh bb_upper
+        pct_b = prev.get('bb_pct_b', float('nan'))
+        pct_b_str = f"{pct_b:.2f}" if not pd.isna(pct_b) else "N/A"
+
+        long_bb_strict  = prev['low']  <= prev['bb_lower']
+        short_bb_strict = prev['high'] >= prev['bb_upper']
+
+        if pd.isna(pct_b):
+            long_bb_near = short_bb_near = False
+        else:
+            long_bb_near  = (pct_b <= 0.20) and not long_bb_strict
+            short_bb_near = (pct_b >= 0.80) and not short_bb_strict
+
+        long_bb  = long_bb_strict or long_bb_near
+        short_bb = short_bb_strict or short_bb_near
+
         nearest_sup = prev.get('nearest_support', float('nan'))
         nearest_res = prev.get('nearest_resistance', float('nan'))
 
@@ -103,12 +119,21 @@ class SignalEngineBB:
             short_sr = bool(prev.get('is_res', 0)) or abs(prev['close'] - prev['high']) / prev['close'] < self.tolerance
 
         if (trend_bullish and long_bb and long_sr) or (trend_bearish and short_bb and short_sr):
-            confluence_points += 1
-            reasons.append(f"{self.tf_name}: BB Extreme + S/R Confirmed")
-        elif long_bb or short_bb:
-            reasons.append(f"{self.tf_name}: BB Touched (No S/R Confirm)")
+            is_strict = (trend_bullish and long_bb_strict) or (trend_bearish and short_bb_strict)
+            if is_strict:
+                confluence_points += 1.0
+                reasons.append(f"{self.tf_name}: BB Strict Touch + S/R Confirmed (%B={pct_b_str})")
+            else:
+                confluence_points += 0.75
+                reasons.append(f"{self.tf_name}: BB Near Touch + S/R Confirmed (%B={pct_b_str})")
+        elif long_bb_strict or short_bb_strict:
+            confluence_points += 0.5
+            reasons.append(f"{self.tf_name}: BB Strict Touch (No S/R Confirm) (%B={pct_b_str})")
+        elif long_bb_near or short_bb_near:
+            confluence_points += 0.25
+            reasons.append(f"{self.tf_name}: BB Near Touch (No S/R Confirm) (%B={pct_b_str})")
         else:
-            reasons.append(f"{self.tf_name}: No BB Extreme Touch")
+            reasons.append(f"{self.tf_name}: No BB Touch (%B={pct_b_str})")
 
         # ──────────────────────────────────────────────
         # 3. RSI MOMENTUM — Harus SEARAH dengan bias
@@ -162,6 +187,23 @@ class SignalEngineBB:
             reasons.append(f"{self.tf_name}: Volume Weak ({vol_ratio:.1f}x)")
 
         # ──────────────────────────────────────────────
+        # HARD PREREQUISITE — Solusi B
+        # Minimal satu faktor "price action" harus hadir sebelum momentum dihitung.
+        # RSI + MACD saja = lagging indicator murni (baca data yang sama: close price).
+        # Tanpa BB zone (near/strict) ATAU volume ≥ 1.0x, sinyal tidak memiliki
+        # anchor pada level harga atau partisipasi pasar yang nyata.
+        # ──────────────────────────────────────────────
+        has_bb_context     = (trend_bullish and long_bb) or (trend_bearish and short_bb)
+        has_volume_context = vol_ratio >= 1.0
+
+        if not (has_bb_context or has_volume_context):
+            reasons.append(
+                f"{self.tf_name}: ⛔ PREREQ VETO — Tidak ada price action anchor "
+                f"(BB di luar zona 20% dan Volume lemah {vol_ratio:.1f}x)"
+            )
+            return "NEUTRAL", 0, reasons
+
+        # ──────────────────────────────────────────────
         # 5b. FORMING CANDLE CONFIRMATION (Real-time)
         # ──────────────────────────────────────────────
         if confluence_points > 0:
@@ -179,13 +221,14 @@ class SignalEngineBB:
         confluence_rate = confluence_points / max_possible_points  # 0.0 s/d 1.0
         score = confluence_rate * 3 * direction  # Normalized to -3.0 s/d +3.0
 
-        # Threshold: rate >= 0.4 → score >= 1.2 (compatible dengan parent function)
-        if confluence_rate >= 0.4:
+        # Threshold: rate >= 0.5 (naik dari 0.4) — mencegah pure RSI+MACD lolos
+        # Minimum poin: 4.5 × 0.5 = 2.25 (butuh setidaknya BB Near Touch + RSI + MACD)
+        if confluence_rate >= 0.5:
             signal = "BULLISH" if trend_bullish else "BEARISH"
             reasons.append(f"{self.tf_name}: Confluence OK ({confluence_rate:.0%})")
         else:
             signal = "NEUTRAL"
-            reasons.append(f"{self.tf_name}: Confluence rendah ({confluence_rate:.0%}, butuh ≥40%)")
+            reasons.append(f"{self.tf_name}: Confluence rendah ({confluence_rate:.0%}, butuh ≥50%)")
 
         return signal, round(score, 2), reasons
 

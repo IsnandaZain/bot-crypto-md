@@ -18,40 +18,42 @@ class PositionSizer:
         """
         if signal == "NO TRADE" or entry_price <= 0:
             return None
-        
-        # 1. Hitung Risk Distance (Jarak SL dalam harga)
+
+        # 1. Round harga terlebih dahulu, lalu hitung risk_distance sekali (fix #3)
+        entry_price     = self._round_to_precision(entry_price, 6)
+        stop_loss_price = self._round_to_precision(stop_loss_price, 6)
+
         risk_distance = abs(entry_price - stop_loss_price)
-        risk_pct = risk_distance / entry_price  # Contoh: 0.05 = 5%
+        risk_pct      = risk_distance / entry_price
         print(f"entry_price : {entry_price} | stop_loss_price : {stop_loss_price}")
         print(f"risk_distance : {risk_distance} | risk_pct : {risk_pct}")
-        
-        # 2. Hitung Modal yang Siap Di-risk (Misal 5% dari balance)
-        max_position_pct = TRADING_CONFIG['max_position_size_pct'] / 100  # 0.05
-        risk_capital = self.balance * max_position_pct
+
+        # 2. Hitung Modal yang Siap Di-risk
+        max_position_pct = TRADING_CONFIG['max_position_size_pct'] / 100
+        risk_capital     = self.balance * max_position_pct
         print(f"risk_capital : {risk_capital}")
-        
-        # 3. Hitung Ukuran Posisi Sebenarnya (Dengan Leverage)
-        # Rumus: Position Value = Risk Capital / (Risk % * Leverage)
-        # Ini memastikan jika kena SL, loss hanya sebesar risk_capital
-        position_value = risk_capital * self.leverage  # Fallback jika SL = 0
-        
-        # 4. Batasi Position Value agar tidak melebihi buying power
+
+        # 3. Hitung Quantity berbasis risk capital & risk distance (fix #1)
+        # Rumus: quantity = risk_capital / risk_distance
+        # Jaminan: jika kena SL → loss = quantity × risk_distance = risk_capital ✓
+        if risk_distance > 0:
+            quantity = risk_capital / risk_distance
+        else:
+            quantity = 0.0
+
+        # 4. Hitung Position Value dari quantity, lalu batasi dengan buying power
+        position_value   = quantity * entry_price
         max_buying_power = self.balance * self.leverage
         if position_value > max_buying_power:
             position_value = max_buying_power
-        
-        # 5. Hitung Quantity Koin (Quantity = Value / Price)
+            quantity       = position_value / entry_price
+
         print(f"position_value : {position_value}")
-        quantity = position_value / entry_price
-        
-        # 6. Sesuaikan dengan Precision Exchange (Bybit TAOUSDT)
-        # TAO biasanya 3 desimal untuk quantity, 2 desimal untuk price
-        quantity = self._round_to_precision(quantity, 3)  # 3 desimal
-        entry_price = self._round_to_precision(entry_price, 6)
-        stop_loss_price = self._round_to_precision(stop_loss_price, 6)
-        
-        # Hitung TP sesuai arah sinyal
-        risk_distance = abs(entry_price - stop_loss_price)
+
+        # 5. Round quantity setelah semua kalkulasi selesai
+        quantity = self._round_to_precision(quantity, 3)
+
+        # 6. Hitung TP sesuai arah sinyal
         if signal == "LONG":
             take_profit_price = self._round_to_precision(
                 entry_price + (risk_distance * self.cfg['rr_ratio']), 6
@@ -60,11 +62,14 @@ class PositionSizer:
             take_profit_price = self._round_to_precision(
                 entry_price - (risk_distance * self.cfg['rr_ratio']), 6
             )
-        
+
         # 7. Hitung Estimasi Fee (Taker fee Bybit ~0.05% - 0.06%)
         taker_fee_rate = 0.0006
-        estimated_fee = position_value * taker_fee_rate
-        
+        estimated_fee  = position_value * taker_fee_rate
+
+        # 8. Loss aktual saat kena SL = quantity × risk_distance (fix #2)
+        estimated_loss_at_sl = self._round_to_precision(quantity * risk_distance, 4)
+
         return {
             'signal': signal,
             'entry_price': entry_price,
@@ -75,7 +80,7 @@ class PositionSizer:
             'leverage': self.leverage,
             'margin_required': position_value / self.leverage,
             'risk_capital': risk_capital,
-            'estimated_loss_at_sl': risk_capital,  # Karena kita hitung dari risk_capital
+            'estimated_loss_at_sl': estimated_loss_at_sl,
             'estimated_fee': estimated_fee,
             'account_balance': self.balance,
             'free_balance_after': self.balance - (position_value / self.leverage)
