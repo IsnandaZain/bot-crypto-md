@@ -54,13 +54,17 @@ class BotLogger:
             print("💤 Tidak ada sinyal baru kali ini")
         else:
             for r in new_signals:
+                risk = r['risk']
                 print(f"\n{r['symbol']} ({r['signal']})")
-                print(f"  Entry: ${r['risk']['entry']:.6f}")
-                print(f"  SL: ${r['risk']['stop_loss']:.6f} ({r['risk']['sl_pct_from_entry']})")
-                print(f"  TP: ${r['risk']['take_profit']:.6f} ({r['risk']['tp_pct_from_entry']})")
-                print(f"  Qty: {r['position']['quantity']}")
+                print(f"  Entry : ${risk['entry']:.6f}")
+                print(f"  SL    : ${risk['stop_loss']:.6f} ({risk['sl_pct_from_entry']})")
+                print(f"  TP1   : ${risk['take_profit_1']:.6f} ({risk['tp1_pct_from_entry']})")
+                print(f"  TP2   : ${risk['take_profit_2']:.6f} ({risk['tp2_pct_from_entry']})")
+                print(f"  TP3   : ${risk['take_profit_3']:.6f} ({risk['tp3_pct_from_entry']})")
+                print(f"  RR    : {risk['rr_ratio_actual']:.2f}x")
+                print(f"  Qty   : {r['position']['quantity']}")
                 print(f"  Margin: ${r['position']['margin_required']:.6f}")
-                print(f"  Method: {r['risk']['method']}")
+                print(f"  Method: {risk['method']}")
                 
                 print(f"  Alasan:")
                 for i, reason in enumerate(r['reasons'], 1):
