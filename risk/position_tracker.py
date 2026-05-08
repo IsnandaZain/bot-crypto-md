@@ -68,7 +68,7 @@ class PositionTracker:
         # Hapus key yang nilainya None agar bersih
         return {k: v for k, v in result.items() if v is not None}
     
-    def add_position(self, position_info):
+    def add_position(self, position_info, risk_levels=None):
         """Tambah posisi baru ke list"""
         new_position = {
             'symbol': position_info['symbol'],
@@ -77,6 +77,11 @@ class PositionTracker:
             'current_price': position_info['entry_price'],
             'stop_loss': position_info['stop_loss'],
             'take_profit': position_info['take_profit'],
+            # TP multi-level untuk Partial TP. Fallback ke take_profit jika tidak ada.
+            'take_profit_1': risk_levels['take_profit_1'] if risk_levels else position_info['take_profit'],
+            'take_profit_2': risk_levels['take_profit_2'] if risk_levels else position_info['take_profit'],
+            'take_profit_3': risk_levels['take_profit_3'] if risk_levels else position_info['take_profit'],
+            'tp_stage': 0,  # 0=belum hit TP apapun, 1=TP1 hit, 2=TP2 hit
             'quantity': position_info['quantity'],
             'leverage': position_info['leverage'],
             'margin_required': position_info['margin_required'],
@@ -92,6 +97,110 @@ class PositionTracker:
         self.save_positions()
         print(f"✅ Posisi baru ditambahkan: {new_position['symbol']} {new_position['signal']}")
     
+    def update_partial_tp(self, current_prices):
+        """
+        Monitor TP1 dan TP2, geser SL saat masing-masing level tercapai.
+
+        tp_stage 0 → 1 (TP1 hit): geser SL ke breakeven atau TP1
+        tp_stage 1 → 2 (TP2 hit): geser SL ke TP1
+        tp_stage 2   (TP3)       : ditangani oleh check_tp_sl() sebagai final exit
+
+        Posisi TIDAK ditutup di sini — hanya SL yang digeser.
+        check_tp_sl() tetap bertanggung jawab atas penutupan posisi.
+        """
+        from config import RISK_CONFIG
+
+        if not RISK_CONFIG.get('partial_tp_enabled', True):
+            return []
+
+        fee_buffer    = RISK_CONFIG.get('breakeven_fee_buffer', 0.0012)
+        tp1_lock_to   = RISK_CONFIG.get('tp1_sl_lock_to', 'breakeven')
+        updated       = []
+
+        for pos in self.positions:
+            if pos['status'] != 'OPEN':
+                continue
+            if pos['symbol'] not in current_prices:
+                continue
+
+            current_price = current_prices[pos['symbol']]
+            signal        = pos['signal']
+            entry         = pos['entry_price']
+            tp_stage      = pos.get('tp_stage', 0)
+
+            # Pastikan field tp multi-level ada (backward compat posisi lama)
+            tp1 = pos.get('take_profit_1', pos['take_profit'])
+            tp2 = pos.get('take_profit_2', pos['take_profit'])
+
+            # ── STAGE 0 → 1: Cek apakah TP1 tercapai ──────────────────────
+            if tp_stage == 0:
+                tp1_hit = (signal == 'LONG'  and current_price >= tp1) or \
+                          (signal == 'SHORT' and current_price <= tp1)
+
+                if tp1_hit:
+                    # Tentukan SL baru berdasarkan konfigurasi tp1_sl_lock_to
+                    if tp1_lock_to == 'tp1':
+                        new_sl = tp1
+                    else:  # default: breakeven
+                        buf    = entry * fee_buffer
+                        new_sl = entry + buf if signal == 'LONG' else entry - buf
+
+                    # Validasi SL tidak mundur
+                    sl_valid = (signal == 'LONG'  and new_sl > pos['stop_loss']) or \
+                               (signal == 'SHORT' and new_sl < pos['stop_loss'])
+
+                    old_sl         = pos['stop_loss']
+                    pos['tp_stage'] = 1
+                    pos['breakeven_triggered'] = True  # sinkronisasi dengan komponen 1
+
+                    if sl_valid:
+                        pos['stop_loss'] = new_sl
+                        print(
+                            f"🎯 TP1 HIT: {pos['symbol']} {signal} @ {current_price:.6f} "
+                            f"| SL {old_sl:.6f} → {new_sl:.6f} "
+                            f"({'TP1 Lock' if tp1_lock_to == 'tp1' else 'Breakeven'})"
+                        )
+                    else:
+                        print(
+                            f"🎯 TP1 HIT: {pos['symbol']} {signal} @ {current_price:.6f} "
+                            f"| SL tidak digeser (sudah lebih baik: {pos['stop_loss']:.6f})"
+                        )
+
+                    updated.append(pos['symbol'])
+
+            # ── STAGE 1 → 2: Cek apakah TP2 tercapai ──────────────────────
+            elif tp_stage == 1:
+                tp2_hit = (signal == 'LONG'  and current_price >= tp2) or \
+                          (signal == 'SHORT' and current_price <= tp2)
+
+                if tp2_hit:
+                    # Lock SL ke TP1 — minimal profit TP1 sudah terjamin
+                    new_sl     = tp1
+                    sl_valid   = (signal == 'LONG'  and new_sl > pos['stop_loss']) or \
+                                 (signal == 'SHORT' and new_sl < pos['stop_loss'])
+
+                    old_sl          = pos['stop_loss']
+                    pos['tp_stage'] = 2
+
+                    if sl_valid:
+                        pos['stop_loss'] = new_sl
+                        print(
+                            f"🎯 TP2 HIT: {pos['symbol']} {signal} @ {current_price:.6f} "
+                            f"| SL {old_sl:.6f} → {new_sl:.6f} (Lock @ TP1)"
+                        )
+                    else:
+                        print(
+                            f"🎯 TP2 HIT: {pos['symbol']} {signal} @ {current_price:.6f} "
+                            f"| SL tidak digeser (sudah lebih baik: {pos['stop_loss']:.6f})"
+                        )
+
+                    updated.append(pos['symbol'])
+
+        if updated:
+            self.save_positions()
+
+        return updated
+
     def update_breakeven_sl(self, current_prices):
         """
         Geser SL ke breakeven (entry + buffer fee) saat posisi sudah
@@ -176,28 +285,30 @@ class PositionTracker:
             exit_price = None
             exit_reason = None
 
-            # jika sudah diatas 105% auto TP saja
-            # print((pos['current_price'] - pos['entry_price']) / pos['entry_price'] * 100 * pos['leverage'])
+            # jika sudah diatas 150% equity auto TP saja
             if (pos['current_price'] - pos['entry_price']) / pos['entry_price'] * 100 * pos['leverage'] > 150:
                 exit_price = pos['current_price']
                 exit_reason = 'AUTO_TP_HIT'
 
             else:
-                # Cek SL
+                # Gunakan TP3 sebagai final exit jika tersedia (Partial TP flow)
+                # tp_stage 2 = TP1 & TP2 sudah hit, menunggu TP3 atau SL
+                final_tp = pos.get('take_profit_3', pos['take_profit'])
+
                 if pos['signal'] == 'LONG':
                     if current_price <= pos['stop_loss']:
                         exit_price = pos['stop_loss']
                         exit_reason = 'SL_HIT'
-                    elif current_price >= pos['take_profit']:
-                        exit_price = pos['take_profit']
-                        exit_reason = 'TP_HIT'
+                    elif current_price >= final_tp:
+                        exit_price = final_tp
+                        exit_reason = 'TP3_HIT' if pos.get('tp_stage', 0) >= 2 else 'TP_HIT'
                 else:  # SHORT
                     if current_price >= pos['stop_loss']:
                         exit_price = pos['stop_loss']
                         exit_reason = 'SL_HIT'
-                    elif current_price <= pos['take_profit']:
-                        exit_price = pos['take_profit']
-                        exit_reason = 'TP_HIT'
+                    elif current_price <= final_tp:
+                        exit_price = final_tp
+                        exit_reason = 'TP3_HIT' if pos.get('tp_stage', 0) >= 2 else 'TP_HIT'
             
             # Jika exit, hitung PnL dan tutup posisi
             if exit_price:
@@ -214,6 +325,7 @@ class PositionTracker:
                     'opened_at': pos['opened_at'],
                     'closed_at': datetime.now().isoformat(),
                     'exit_reason': exit_reason,
+                    'tp_stage_at_close': pos.get('tp_stage', 0),
                     'method': pos['method']
                 }
                 

@@ -447,6 +447,7 @@ def scan_market():
     print("="*70)
     
     tracker.update_unrealized_pnl(current_prices)
+    tracker.update_partial_tp(current_prices)
     tracker.update_breakeven_sl(current_prices)
     closed_positions = tracker.check_tp_sl(current_prices)
 
@@ -602,8 +603,8 @@ def scan_market():
                     method=risk_levels_bb.get('method', 'BB')
                 )
 
-                # Tambahkan ke tracker
-                tracker.add_position(position_info_bb)
+                # Tambahkan ke tracker (sertakan risk_levels untuk TP1/TP2/TP3)
+                tracker.add_position(position_info_bb, risk_levels=risk_levels_bb)
                 new_signals.append({
                     'symbol': symbol,
                     'signal': signal_bb,
