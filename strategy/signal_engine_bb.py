@@ -71,8 +71,8 @@ class SignalEngineBB:
                 swing_dir   = "Bullish Rally" if trend_bearish else "Bearish Drop"
                 prior_opp   = prior_above_count if trend_bearish else prior_below_count
 
-                if confirmed_count == 2 and price_swing > 0.015:
-                    # Bias lemah + ada counter-swing >1.5% → kemungkinan besar hanya pullback
+                if confirmed_count == 2 and price_swing > 0.020:
+                    # Bias lemah + ada counter-swing >2.0% → kemungkinan besar hanya pullback
                     reasons.append(
                         f"{self.tf_name}: ⚠️ PULLBACK VETO — Prior {swing_dir} {price_swing:.1%} "
                         f"({prior_opp}/5 candles sebelumnya berlawanan), bias terlalu lemah (2/3)"
@@ -87,8 +87,8 @@ class SignalEngineBB:
         # ──────────────────────────────────────────────
         # 2. BB TOUCH + S/R CONFIRMATION (Two-Tier)
         # Tier 1 — Strict: wick menyentuh/melewati band       → poin penuh
-        # Tier 2 — Near  : close di 20% terluar band (%B)     → poin parsial
-        # Threshold %B: ≤ 0.20 (dekat lower) / ≥ 0.80 (dekat upper)
+        # Tier 2 — Near  : close di 25% terluar band (%B)     → poin parsial
+        # Threshold %B: ≤ 0.25 (dekat lower) / ≥ 0.75 (dekat upper)
         # ──────────────────────────────────────────────
         pct_b = prev.get('bb_pct_b', float('nan'))
         pct_b_str = f"{pct_b:.2f}" if not pd.isna(pct_b) else "N/A"
@@ -99,8 +99,8 @@ class SignalEngineBB:
         if pd.isna(pct_b):
             long_bb_near = short_bb_near = False
         else:
-            long_bb_near  = (pct_b <= 0.20) and not long_bb_strict
-            short_bb_near = (pct_b >= 0.80) and not short_bb_strict
+            long_bb_near  = (pct_b <= 0.25) and not long_bb_strict
+            short_bb_near = (pct_b >= 0.75) and not short_bb_strict
 
         long_bb  = long_bb_strict or long_bb_near
         short_bb = short_bb_strict or short_bb_near
@@ -141,8 +141,8 @@ class SignalEngineBB:
         rsi_val     = prev['rsi']
         rsi_rising  = prev['rsi'] > prev2['rsi']
         rsi_falling = prev['rsi'] < prev2['rsi']
-        rsi_ok = (trend_bullish and 45 < rsi_val < 70 and rsi_rising) or \
-                 (trend_bearish and 30 < rsi_val < 55 and rsi_falling)
+        rsi_ok = (trend_bullish and 40 < rsi_val < 72 and rsi_rising) or \
+                 (trend_bearish and 28 < rsi_val < 60 and rsi_falling)
 
         if rsi_ok:
             confluence_points += 1
@@ -166,10 +166,11 @@ class SignalEngineBB:
                   (trend_bearish and not macd_positive and not macd_inc)
 
         if macd_ok:
-            confluence_points += 1
+            confluence_points += 1.0
             reasons.append(f"{self.tf_name}: MACD Momentum Agrees ({prev['macd_hist']:.4f})")
         elif (trend_bullish and macd_inc) or (trend_bearish and not macd_inc):
-            reasons.append(f"{self.tf_name}: MACD Direction OK but Wrong Side of Zero ({prev['macd_hist']:.4f})")
+            confluence_points += 0.5  # Arah benar tapi belum cross zero (lagging normal)
+            reasons.append(f"{self.tf_name}: MACD Direction OK, Wrong Side of Zero ({prev['macd_hist']:.4f}) +0.5pt")
         else:
             reasons.append(f"{self.tf_name}: MACD Diverges ({prev['macd_hist']:.4f})")
 

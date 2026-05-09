@@ -5,42 +5,11 @@ EXCHANGE_CONFIG = {
     "enableRateLimit": True
 }
 
-# DAFTAR COIN YANG DI SCAN
-WATCHLIST = [
-    'SOL/USDT:USDT',
-    'XRP/USDT:USDT',
-    'HYPE/USDT:USDT',
-    'ADA/USDT:USDT',
-    'TAO/USDT:USDT',
-    'SUI/USDT:USDT',
-    'ASTER/USDT:USDT',
-    'DOGE/USDT:USDT',
-    'PENDLE/USDT:USDT',
-    'FARTCOIN/USDT:USDT',   
-    'PENGU/USDT:USDT',
-    'ARB/USDT:USDT',
-    'NEAR/USDT:USDT'
-]
-
-""" 
-     'SOL/USDT:USDT',
-    'XRP/USDT:USDT',
-    'HYPE/USDT:USDT',
-    'ADA/USDT:USDT',
-    'TAO/USDT:USDT',
-    'SUI/USDT:USDT',
-    'ASTER/USDT:USDT',
-    'DOGE/USDT:USDT',
-    'PENDLE/USDT:USDT',
-    'FARTCOIN/USDT:USDT',   
-    'PENGU/USDT:USDT',
-    'ARB/USDT:USDT',
-    'NEAR/USDT:USDT'
-"""
+# DAFTAR COIN YANG DI SCAN dikelola di data/watchlist.json
+# Edit file tersebut untuk menambah/hapus coin tanpa restart bot
 
 # KONFIGURASI MULTI-TIMEFRAME
 TIMEFRAMES = {
-    'higher': '4h', # Trend
     'base': '1h', # Signal
     'lower': '15m' # Entry
 }
@@ -104,9 +73,9 @@ RISK_CONFIG = {
     # ⭐ ATR Multiplier lebih tinggi untuk crypto volatility
     'sl_atr_multiplier': 3.5,          # Naik dari 2.5 → 3.5
     
-    # ⭐ Guardrails yang lebih longgar
-    'sl_min_pct': 0.03,                # Naik dari 1% → 3% (minimum SL)
-    'sl_max_pct': 0.08,                # Naik dari 5% → 8% (maximum SL)
+    # ⭐ Guardrails aman untuk leverage 20x (liquidasi ~4.5-5% dari entry)
+    'sl_min_pct': 0.010,               # Min SL 1% dari entry
+    'sl_max_pct': 0.030,               # Max SL 3% dari entry (aman, jauh dari liquidasi)
     
     # ⭐ Risk:Reward lebih agresif
     'rr_ratio': 2,                   # Naik dari 2.0 → 2.5 (TP lebih jauh)
@@ -117,7 +86,23 @@ RISK_CONFIG = {
     'sr_buffer_pct': 0.01,             # Naik dari 0.5% → 1% (buffer lebih besar)
     
     # ⭐ TP Minimum Guardrail (BARU)
-    'tp_min_pct': 0.03,                # TP minimal 3% dari entry
+    'tp_min_pct': 0.010,               # TP minimal 1% dari entry
+
+    # ⭐ BREAKEVEN SL CONFIG
+    # Saat unrealized profit (dalam % equity) mencapai threshold ini,
+    # SL otomatis digeser ke entry price + buffer kecil untuk cover fee.
+    # Contoh: profit_trigger_pct=30 → saat profit >= 30% dari margin,
+    #         SL digeser ke entry agar posisi tidak bisa rugi.
+    'breakeven_profit_trigger_pct': 30,  # % dari margin (bukan % dari harga)
+    'breakeven_fee_buffer': 0.0012,      # 0.12% untuk cover entry+exit fee
+
+    # ⭐ PARTIAL TP + SL LOCK CONFIG
+    # Saat TP1 tercapai → geser SL ke entry (breakeven) jika belum ter-trigger
+    # Saat TP2 tercapai → geser SL ke TP1 (lock sebagian profit)
+    # TP3 → tutup posisi penuh (final exit)
+    'partial_tp_enabled': True,
+    'tp1_sl_lock_to': 'breakeven',  # 'breakeven' atau 'tp1' (agresif)
+    'tp2_sl_lock_to': 'tp1',        # geser SL ke TP1 setelah TP2 hit
 }
 
 # ⭐ STORAGE CONFIG (BARU)
