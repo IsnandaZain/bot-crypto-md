@@ -203,6 +203,20 @@ class RiskManager:
             elif self.signal == "LONG" and entry < bb_mid < tp2_raw:
                 tp1_raw = bb_mid * (1 + bb_buf)
 
+        # ── TP1 floor: minimum 2% dari entry (setara 40% gain di leverage 20x) ──
+        # Ambil yang lebih dekat ke entry antara hasil BB Mid dan floor 2%.
+        # Mencegah TP1 terlalu jauh saat BB Mid ada di posisi ambisius.
+        tp1_floor_pct = self.cfg.get('tp1_floor_pct', 0.02)  # default 2%
+        tp1_floor = entry * (1 + tp1_floor_pct) if self.signal == "LONG" else entry * (1 - tp1_floor_pct)
+        if self.signal == "LONG":
+            # Ambil yang lebih dekat ke entry (lebih kecil)
+            if tp1_raw > tp1_floor:
+                tp1_raw = tp1_floor
+        else:
+            # SHORT: ambil yang lebih dekat ke entry (lebih besar)
+            if tp1_raw < tp1_floor:
+                tp1_raw = tp1_floor
+
         # ── TP3: snap ke BB band berlawanan jika calculated TP3 melewati band──
         # BB band berlawanan adalah batas natural volatilitas.
         # Jika TP3 lebih ambisius dari band, tarik ke band (lebih konservatif & realistis).

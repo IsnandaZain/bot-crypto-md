@@ -2,8 +2,9 @@
 # Hanya tambahkan parameter tf_name untuk identifikasi
 
 import pandas as pd
-import mplfinance as mpf
-import matplotlib.pyplot as plt
+# mplfinance dinonaktifkan — chart tidak tersedia di VPS headless
+# import mplfinance as mpf
+# import matplotlib.pyplot as plt
 
 from datetime import datetime
 import os
@@ -473,7 +474,12 @@ class SignalEngineBB:
         }
     
     def plot_and_save_last_n(self, n_candles: int = 30, save_dir: str = "./data", symbol: str = "Unknown"):
-        """Analisis visual & simpan chart terakhir sebagai gambar dengan nama unik"""
+        """Chart dinonaktifkan — mplfinance tidak tersedia di VPS"""
+        print(f"⚠️  Chart dinonaktifkan (mplfinance tidak tersedia)")
+        return None
+
+    def _plot_and_save_last_n_disabled(self, n_candles: int = 30, save_dir: str = "./data", symbol: str = "Unknown"):
+        """[DISABLED] Analisis visual & simpan chart terakhir sebagai gambar dengan nama unik"""
         if self.df.empty:
             print("DataFrame kosong.")
             return None
@@ -533,16 +539,13 @@ class SignalEngineBB:
         return filename
 
     def plot_and_save_to_signal_folder(self, signal_folder: str, n_candles: int = 30, symbol: str = "Unknown"):
+        """Chart dinonaktifkan — mplfinance tidak tersedia di VPS"""
+        print(f"⚠️  Chart dinonaktifkan (mplfinance tidak tersedia)")
+        return None
+
+    def _plot_and_save_to_signal_folder_disabled(self, signal_folder: str, n_candles: int = 30, symbol: str = "Unknown"):
         """
-        Plot dan simpan chart ke dalam folder sinyal yang sudah ditentukan.
-        
-        Args:
-            signal_folder: Path ke folder sinyal (contoh: signals/2026-04-28/SOLUSDT_LONG_150823)
-            n_candles: Jumlah candle yang ditampilkan
-            symbol: Nama pair/symbol
-        
-        Returns:
-            Path ke file chart yang disimpan
+        [DISABLED] Plot dan simpan chart ke dalam folder sinyal yang sudah ditentukan.
         """
         if self.df.empty:
             print("DataFrame kosong.")

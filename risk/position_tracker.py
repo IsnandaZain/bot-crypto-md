@@ -99,23 +99,26 @@ class PositionTracker:
     
     def update_partial_tp(self, current_prices):
         """
-        Monitor TP1 dan TP2, geser SL saat masing-masing level tercapai.
+        Monitor TP1 dan TP2, eksekusi partial close dan geser SL.
 
-        tp_stage 0 → 1 (TP1 hit): geser SL ke breakeven atau TP1
-        tp_stage 1 → 2 (TP2 hit): geser SL ke TP1
-        tp_stage 2   (TP3)       : ditangani oleh check_tp_sl() sebagai final exit
+        tp_stage 0 → 1 (TP1 hit):
+            - Tutup 50% posisi (tp1_partial_close_pct)
+            - Geser SL ke entry + 10% margin profit (= 0.5% harga di leverage 20x)
+            - Catat partial close di history
 
-        Posisi TIDAK ditutup di sini — hanya SL yang digeser.
-        check_tp_sl() tetap bertanggung jawab atas penutupan posisi.
+        tp_stage 1 → 2 (TP2 hit):
+            - Flag untuk tutup semua sisa di check_tp_sl()
+
+        Penutupan posisi penuh ditangani oleh check_tp_sl().
         """
         from config import RISK_CONFIG
 
         if not RISK_CONFIG.get('partial_tp_enabled', True):
             return []
 
-        fee_buffer    = RISK_CONFIG.get('breakeven_fee_buffer', 0.0012)
-        tp1_lock_to   = RISK_CONFIG.get('tp1_sl_lock_to', 'breakeven')
-        updated       = []
+        partial_close_pct    = RISK_CONFIG.get('tp1_partial_close_pct', 0.50)
+        sl_profit_margin_pct = RISK_CONFIG.get('tp1_sl_profit_margin_pct', 0.10)
+        updated              = []
 
         for pos in self.positions:
             if pos['status'] != 'OPEN':
@@ -128,78 +131,123 @@ class PositionTracker:
             entry         = pos['entry_price']
             tp_stage      = pos.get('tp_stage', 0)
 
-            # Pastikan field tp multi-level ada (backward compat posisi lama)
             tp1 = pos.get('take_profit_1', pos['take_profit'])
             tp2 = pos.get('take_profit_2', pos['take_profit'])
 
-            # ── STAGE 0 → 1: Cek apakah TP1 tercapai ──────────────────────
+            # ── STAGE 0 → 1: TP1 tercapai ─────────────────────────────────
             if tp_stage == 0:
                 tp1_hit = (signal == 'LONG'  and current_price >= tp1) or \
                           (signal == 'SHORT' and current_price <= tp1)
 
                 if tp1_hit:
-                    # Tentukan SL baru berdasarkan konfigurasi tp1_sl_lock_to
-                    if tp1_lock_to == 'tp1':
-                        new_sl = tp1
-                    else:  # default: breakeven
-                        buf    = entry * fee_buffer
-                        new_sl = entry + buf if signal == 'LONG' else entry - buf
+                    # Hitung qty partial close (50%)
+                    qty_close    = pos['quantity'] * partial_close_pct
+                    qty_remain   = pos['quantity'] - qty_close
+                    margin_close = pos['margin_required'] * partial_close_pct
 
-                    # Validasi SL tidak mundur
-                    sl_valid = (signal == 'LONG'  and new_sl > pos['stop_loss']) or \
-                               (signal == 'SHORT' and new_sl < pos['stop_loss'])
+                    # Hitung PnL partial
+                    pnl_partial  = self._calculate_pnl_partial(pos, tp1, qty_close)
 
+                    # Catat partial close di history
+                    partial_record = {
+                        'symbol'       : pos['symbol'],
+                        'signal'       : signal,
+                        'entry_price'  : entry,
+                        'exit_price'   : tp1,
+                        'quantity'     : qty_close,
+                        'pnl_usdt'     : pnl_partial,
+                        'pnl_pct'      : (pnl_partial / margin_close * 100) if margin_close > 0 else 0,
+                        'opened_at'    : pos['opened_at'],
+                        'closed_at'    : datetime.now().isoformat(),
+                        'exit_reason'  : 'TP1_PARTIAL_50PCT',
+                        'tp_stage_at_close': 1,
+                        'method'       : pos['method'],
+                        'is_partial'   : True
+                    }
+                    self.history.append(partial_record)
+
+                    # Update posisi — kurangi qty dan margin
+                    pos['quantity']        = qty_remain
+                    pos['margin_required'] = pos['margin_required'] * (1 - partial_close_pct)
+                    pos['tp_stage']        = 1
+                    pos['breakeven_triggered'] = True
+
+                    # Geser SL ke entry + 10% margin profit (= 0.5% harga di leverage 20x)
+                    leverage       = pos.get('leverage', 20)
+                    sl_price_shift = entry * (sl_profit_margin_pct / leverage)
+                    new_sl         = entry + sl_price_shift if signal == 'LONG' else entry - sl_price_shift
                     old_sl         = pos['stop_loss']
-                    pos['tp_stage'] = 1
-                    pos['breakeven_triggered'] = True  # sinkronisasi dengan komponen 1
 
+                    sl_valid = (signal == 'LONG'  and new_sl > old_sl) or \
+                               (signal == 'SHORT' and new_sl < old_sl)
                     if sl_valid:
                         pos['stop_loss'] = new_sl
-                        print(
-                            f"🎯 TP1 HIT: {pos['symbol']} {signal} @ {current_price:.6f} "
-                            f"| SL {old_sl:.6f} → {new_sl:.6f} "
-                            f"({'TP1 Lock' if tp1_lock_to == 'tp1' else 'Breakeven'})"
-                        )
-                    else:
-                        print(
-                            f"🎯 TP1 HIT: {pos['symbol']} {signal} @ {current_price:.6f} "
-                            f"| SL tidak digeser (sudah lebih baik: {pos['stop_loss']:.6f})"
-                        )
+
+                    # Stub eksekusi real order (aktifkan saat live trading)
+                    self._execute_partial_close_order(pos['symbol'], signal, qty_close, tp1, paper=True)
 
                     updated.append(pos['symbol'])
+                    print(
+                        f"🎯 TP1 PARTIAL: {pos['symbol']} {signal} @ {current_price:.6f} "
+                        f"| Tutup {partial_close_pct*100:.0f}% (qty={qty_close:.6f}) "
+                        f"| PnL: ${pnl_partial:.4f} "
+                        f"| SL {old_sl:.6f} → {new_sl:.6f} (+{sl_profit_margin_pct*100:.0f}% margin)"
+                    )
 
-            # ── STAGE 1 → 2: Cek apakah TP2 tercapai ──────────────────────
+            # ── STAGE 1 → 2: TP2 tercapai ─────────────────────────────────
             elif tp_stage == 1:
                 tp2_hit = (signal == 'LONG'  and current_price >= tp2) or \
                           (signal == 'SHORT' and current_price <= tp2)
 
                 if tp2_hit:
-                    # Lock SL ke TP1 — minimal profit TP1 sudah terjamin
-                    new_sl     = tp1
-                    sl_valid   = (signal == 'LONG'  and new_sl > pos['stop_loss']) or \
-                                 (signal == 'SHORT' and new_sl < pos['stop_loss'])
-
-                    old_sl          = pos['stop_loss']
-                    pos['tp_stage'] = 2
-
-                    if sl_valid:
-                        pos['stop_loss'] = new_sl
-                        print(
-                            f"🎯 TP2 HIT: {pos['symbol']} {signal} @ {current_price:.6f} "
-                            f"| SL {old_sl:.6f} → {new_sl:.6f} (Lock @ TP1)"
-                        )
-                    else:
-                        print(
-                            f"🎯 TP2 HIT: {pos['symbol']} {signal} @ {current_price:.6f} "
-                            f"| SL tidak digeser (sudah lebih baik: {pos['stop_loss']:.6f})"
-                        )
-
+                    pos['tp_stage'] = 2  # check_tp_sl() akan tutup semua sisa
                     updated.append(pos['symbol'])
+                    print(
+                        f"🎯 TP2 REACHED: {pos['symbol']} {signal} @ {current_price:.6f} "
+                        f"| Sisa posisi akan ditutup penuh"
+                    )
 
         if updated:
             self.save_positions()
 
         return updated
+
+    def _calculate_pnl_partial(self, position, exit_price, qty):
+        """Hitung PnL untuk sebagian qty yang ditutup"""
+        entry = position['entry_price']
+        if position['signal'] == 'LONG':
+            pnl = (exit_price - entry) * qty
+        else:
+            pnl = (entry - exit_price) * qty
+        # Fee proporsional terhadap qty yang ditutup
+        fee = (position['margin_required'] * (qty / position['quantity'])) * 0.0012
+        return pnl - fee
+
+    def _execute_partial_close_order(self, symbol: str, signal: str, qty: float, price: float, paper: bool = True):
+        """
+        Stub untuk eksekusi partial close order ke exchange.
+
+        Args:
+            symbol : trading pair (misal 'BTC/USDT:USDT')
+            signal : 'LONG' atau 'SHORT'
+            qty    : jumlah kontrak yang ditutup
+            price  : harga target (TP1)
+            paper  : True = paper trading (tidak kirim order), False = live
+
+        TODO (live trading):
+            exchange = ExchangeManager().connect()
+            side = 'sell' if signal == 'LONG' else 'buy'
+            exchange.create_order(symbol, 'market', side, qty, params={'reduceOnly': True})
+        """
+        if paper:
+            print(f"   📝 [PAPER] Partial close order: {symbol} {signal} qty={qty:.6f} @ {price:.6f}")
+        else:
+            # Aktifkan blok ini saat live trading
+            # from core.exchange import ExchangeManager
+            # exchange = ExchangeManager().connect()
+            # side = 'sell' if signal == 'LONG' else 'buy'
+            # exchange.create_order(symbol, 'market', side, qty, params={'reduceOnly': True})
+            pass
 
     def update_breakeven_sl(self, current_prices):
         """
@@ -312,21 +360,30 @@ class PositionTracker:
             
             # Jika exit, hitung PnL dan tutup posisi
             if exit_price:
-                pnl = self._calculate_pnl(pos, exit_price)
-                
+                # Hitung PnL berdasarkan qty sisa (bisa sudah 50% jika TP1 pernah hit)
+                pnl = self._calculate_pnl_partial(pos, exit_price, pos['quantity'])
+
+                # Label exit reason lebih spesifik untuk partial flow
+                tp_stage_now = pos.get('tp_stage', 0)
+                if exit_reason == 'TP_HIT' and tp_stage_now >= 2:
+                    exit_reason = 'TP2_FINAL_CLOSE'
+                elif exit_reason == 'SL_HIT' and tp_stage_now >= 1:
+                    exit_reason = 'SL_HIT_AFTER_TP1'
+
                 closed_pos = {
-                    'symbol': pos['symbol'],
-                    'signal': pos['signal'],
-                    'entry_price': pos['entry_price'],
-                    'exit_price': exit_price,
-                    'quantity': pos['quantity'],
-                    'pnl_usdt': pnl,
-                    'pnl_pct': (pnl / pos['margin_required'] * 100) if pos['margin_required'] > 0 else 0,
-                    'opened_at': pos['opened_at'],
-                    'closed_at': datetime.now().isoformat(),
-                    'exit_reason': exit_reason,
-                    'tp_stage_at_close': pos.get('tp_stage', 0),
-                    'method': pos['method']
+                    'symbol'           : pos['symbol'],
+                    'signal'           : pos['signal'],
+                    'entry_price'      : pos['entry_price'],
+                    'exit_price'       : exit_price,
+                    'quantity'         : pos['quantity'],
+                    'pnl_usdt'         : pnl,
+                    'pnl_pct'          : (pnl / pos['margin_required'] * 100) if pos['margin_required'] > 0 else 0,
+                    'opened_at'        : pos['opened_at'],
+                    'closed_at'        : datetime.now().isoformat(),
+                    'exit_reason'      : exit_reason,
+                    'tp_stage_at_close': tp_stage_now,
+                    'method'           : pos['method'],
+                    'is_partial'       : False
                 }
                 
                 closed_positions.append(closed_pos)

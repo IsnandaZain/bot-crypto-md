@@ -1,6 +1,6 @@
 # indicators/technical.py
 import pandas as pd
-import pandas_ta as ta
+import ta
 from config import INDICATOR_CONFIG
 
 class IndicatorCalculator:
@@ -15,22 +15,46 @@ class IndicatorCalculator:
             df_copy = df.copy()
             
             # EMA
-            df_copy['EMA_SHORT'] = ta.ema(df_copy['close'], length=cfg['ema_short'])
-            df_copy['EMA_LONG'] = ta.ema(df_copy['close'], length=cfg['ema_long'])
+            df_copy['EMA_SHORT'] = ta.trend.EMAIndicator(
+                close=df_copy['close'], window=cfg['ema_short']
+            ).ema_indicator()
+            df_copy['EMA_LONG'] = ta.trend.EMAIndicator(
+                close=df_copy['close'], window=cfg['ema_long']
+            ).ema_indicator()
             
             # RSI
-            df_copy['RSI'] = ta.rsi(df_copy['close'], length=cfg['rsi_period'])
+            df_copy['RSI'] = ta.momentum.RSIIndicator(
+                close=df_copy['close'], window=cfg['rsi_period']
+            ).rsi()
             
             # MACD
-            macd = ta.macd(df_copy['close'], fast=cfg['macd_fast'], slow=cfg['macd_slow'], signal=cfg['macd_signal'])
-            df_copy = pd.concat([df_copy, macd], axis=1)
+            macd_ind = ta.trend.MACD(
+                close=df_copy['close'],
+                window_fast=cfg['macd_fast'],
+                window_slow=cfg['macd_slow'],
+                window_sign=cfg['macd_signal']
+            )
+            df_copy['MACD_12_26_9']      = macd_ind.macd()
+            df_copy['MACDs_12_26_9']     = macd_ind.macd_signal()
+            df_copy['MACDh_12_26_9']     = macd_ind.macd_diff()
             
             # ADX & ATR
-            df_copy['ADX'] = ta.adx(df_copy['high'], df_copy['low'], df_copy['close'], length=cfg['adx_period'])['ADX_14']
-            df_copy['ATR'] = ta.atr(df_copy['high'], df_copy['low'], df_copy['close'], length=cfg['atr_period'])
+            adx_ind = ta.trend.ADXIndicator(
+                high=df_copy['high'],
+                low=df_copy['low'],
+                close=df_copy['close'],
+                window=cfg['adx_period']
+            )
+            df_copy['ADX'] = adx_ind.adx()
+            df_copy['ATR'] = ta.volatility.AverageTrueRange(
+                high=df_copy['high'],
+                low=df_copy['low'],
+                close=df_copy['close'],
+                window=cfg['atr_period']
+            ).average_true_range()
             
             # Volume Avg
-            df_copy['VOL_SMA'] = ta.sma(df_copy['volume'], length=20)
+            df_copy['VOL_SMA'] = df_copy['volume'].rolling(window=20).mean()
             
             processed[tf_key] = df_copy
         

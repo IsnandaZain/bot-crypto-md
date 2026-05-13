@@ -16,14 +16,18 @@ TIMEFRAMES = {
 
 TRADING_CONFIG = {
     'leverage': 20,
-    'max_position_size_pct': 4,
+    'max_position_size_pct': 2.5,      # Turun dari 4% → 2.5% (risk ~1.5% balance per trade)
 
     # ⭐ ACCOUNT SETTINGS (Untuk Position Sizing)
     'account_balance_usdt': 66,  # ⚠️ ISI DENGAN BALANCE ANDA (Manual/Paper)
     'auto_fetch_balance': False,   # True jika mau ambil dari API (butuh API Key)
 
-    # ⭐ MAX SIMULTANEOUS POSITIONS (BARU)
-    'max_open_positions': 8,  # Maksimal 3 posisi terbuka bersamaan
+    # ⭐ MAX SIMULTANEOUS POSITIONS
+    'max_open_positions': 10,       # Turun dari 8 → 6 (worst case 15% balance terpakai)
+
+    # ⭐ MAX DIRECTIONAL POSITIONS (hindari overexposed satu arah saat market crash)
+    'max_long_positions': 5,       # Max 4 posisi LONG bersamaan
+    'max_short_positions': 5,      # Max 4 posisi SHORT bersamaan
 }
 
 # ⭐ ORDER EXECUTION SETTINGS (BARU)
@@ -87,7 +91,10 @@ RISK_CONFIG = {
     
     # ⭐ TP Minimum Guardrail (BARU)
     'tp_min_pct': 0.010,               # TP minimal 1% dari entry
-
+    # ⭐ TP1 FLOOR — minimum gain TP1 terhadap entry price
+    # 2% harga = 40% gain dengan leverage 20x
+    # TP1 akan diambil yang lebih dekat ke entry antara BB Mid dan floor ini
+    'tp1_floor_pct': 0.02,             # 2% dari entry
     # ⭐ BREAKEVEN SL CONFIG
     # Saat unrealized profit (dalam % equity) mencapai threshold ini,
     # SL otomatis digeser ke entry price + buffer kecil untuk cover fee.
@@ -97,12 +104,12 @@ RISK_CONFIG = {
     'breakeven_fee_buffer': 0.0012,      # 0.12% untuk cover entry+exit fee
 
     # ⭐ PARTIAL TP + SL LOCK CONFIG
-    # Saat TP1 tercapai → geser SL ke entry (breakeven) jika belum ter-trigger
-    # Saat TP2 tercapai → geser SL ke TP1 (lock sebagian profit)
-    # TP3 → tutup posisi penuh (final exit)
     'partial_tp_enabled': True,
-    'tp1_sl_lock_to': 'breakeven',  # 'breakeven' atau 'tp1' (agresif)
-    'tp2_sl_lock_to': 'tp1',        # geser SL ke TP1 setelah TP2 hit
+    # TP1 hit → tutup 50% posisi, geser SL ke +10% margin profit (0.5% harga di leverage 20x)
+    'tp1_partial_close_pct': 0.50,       # Tutup 50% saat TP1
+    'tp1_sl_profit_margin_pct': 0.10,    # SL baru = entry + (0.10 / leverage) → 10% margin profit
+    # TP2 hit → tutup semua sisa posisi
+    # SL hit kapanpun → tutup semua sisa
 }
 
 # ⭐ STORAGE CONFIG (BARU)

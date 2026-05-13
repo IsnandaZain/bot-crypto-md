@@ -8,7 +8,8 @@ from risk.position_sizer import PositionSizer
 from risk.position_tracker import PositionTracker
 from risk.balance_manager import BalanceManager  # ⭐ Balance dinamis
 from utils.logger import BotLogger
-from utils.file_manager import get_today_folder, create_signal_folder  # ⭐ IMPORT BARU
+from utils.file_manager import get_today_folder, create_signal_folder
+from utils.session_report import SessionReport
 
 from strategy.mtf_confluence import MTFConfluence
 from strategy.mtf_confluence_bb import MTFConfluenceBB
@@ -405,7 +406,7 @@ Past performance does not guarantee future results.
     return filename
 
 
-def scan_market():
+def scan_market(session: SessionReport = None):
     print("\n" + "="*70)
     print("🚀 Memulai Multi-Coin MTF Scanner...")
     print("="*70)
@@ -458,21 +459,40 @@ def scan_market():
         balance_mgr.update_from_closed_positions(closed_positions)
         # Refresh balance untuk scan berikutnya
         account_balance = balance_mgr.get_balance()
+        # ⭐ Catat ke session report
+        if session:
+            session.record_closed(closed_positions)
+
+    # ⭐ Catat partial TP records ke session report (TP1 partial dari update_partial_tp)
+    if session:
+        partial_records = [r for r in tracker.history if r.get('is_partial') and
+                           r.get('exit_reason') == 'TP1_PARTIAL_50PCT' and
+                           r not in getattr(session, '_records', [])]
+        if partial_records:
+            session.record_closed(partial_records)
     
     # 6. ⭐ PRIORITAS 2: Cek Sinyal Baru (Hanya Jika Ada Slot)
     print("\n" + "="*70)
     print("🔍 CEK SINYAL BARU")
     print("="*70)
-    
+
     summary = tracker.get_summary()
     open_positions_count = summary['total_positions']
-    max_positions = TRADING_CONFIG['max_open_positions']
-    
-    print(f"Posisi Terbuka: {open_positions_count}/{max_positions}")
-    
+    max_positions        = TRADING_CONFIG['max_open_positions']
+    max_long             = TRADING_CONFIG.get('max_long_positions', max_positions)
+    max_short            = TRADING_CONFIG.get('max_short_positions', max_positions)
+
+    # Hitung posisi LONG dan SHORT yang sedang aktif
+    all_positions = summary['positions']
+    long_count  = sum(1 for p in all_positions if p['status'] == 'OPEN' and p['signal'] == 'LONG')
+    short_count = sum(1 for p in all_positions if p['status'] == 'OPEN' and p['signal'] == 'SHORT')
+
+    print(f"Posisi Terbuka : {open_positions_count}/{max_positions}")
+    print(f"Long / Short   : {long_count}/{max_long}  |  {short_count}/{max_short}")
+
     new_signals = []
 
-    # Hanya cari sinyal baru jika masih ada slot
+    # Hanya cari sinyal baru jika masih ada slot total
     if open_positions_count < max_positions:
         fetcher = DataFetcher(exchange)
 
@@ -483,13 +503,24 @@ def scan_market():
             active_positions = tracker.get_active_positions(symbol)
             existing_signal = None
 
-            # 2. Tentukan arah sinyal yang boleh dicari
+            # Tentukan arah sinyal yang boleh dicari
             if not active_positions:
-                print("📍 Tidak ada posisi aktif → Mencari semua peluang")
+                # Cek slot directional sebelum izinkan scan
+                long_ok  = long_count  < max_long
+                short_ok = short_count < max_short
+                if not long_ok and not short_ok:
+                    print(f"⛔ Slot LONG ({long_count}/{max_long}) dan SHORT ({short_count}/{max_short}) penuh → Skip")
+                    continue
+                elif not long_ok:
+                    print(f"⚠️  Slot LONG penuh ({long_count}/{max_long}) → Hanya cari SHORT")
+                elif not short_ok:
+                    print(f"⚠️  Slot SHORT penuh ({short_count}/{max_short}) → Hanya cari LONG")
+                else:
+                    print("📍 Tidak ada posisi aktif → Mencari semua peluang")
                 existing_signal = None
             else:
                 active_sides = list(active_positions.keys())
-                
+
                 if "LONG" in active_sides and "SHORT" not in active_sides:
                     print("⚡ Ada posisi LONG → Mencari peluang SHORT saja (reversal/close)")
                     opposite_signal = "SHORT"
@@ -543,12 +574,17 @@ def scan_market():
             
             # 🎯 FILTER: Jika ada posisi aktif, hanya terima sinyal berlawanan
             if active_positions:
-                # if signal == existing_signal:
-                #     print(f"⏭️  Skip {signal} (sama dengan posisi aktif {existing_signal})")
-                #     signal = "NO_TRADE"
                 if signal_bb == existing_signal:
                     print(f"⏭️  Skip {signal_bb} BB (sama dengan posisi aktif {existing_signal})")
                     signal_bb = "NO_TRADE"
+
+            # 🎯 FILTER DIRECTIONAL: Cek slot LONG/SHORT sebelum terima sinyal baru
+            if signal_bb == "LONG"  and long_count  >= max_long:
+                print(f"⛔ Skip LONG — slot LONG penuh ({long_count}/{max_long})")
+                signal_bb = "NO_TRADE"
+            elif signal_bb == "SHORT" and short_count >= max_short:
+                print(f"⛔ Skip SHORT — slot SHORT penuh ({short_count}/{max_short})")
+                signal_bb = "NO_TRADE"
 
             # add logger - bb
             emoji_bb = "🟢" if signal_bb == "LONG" else "🔴" if signal_bb == "SHORT" else "⚪"
@@ -605,13 +641,29 @@ def scan_market():
 
                 # Tambahkan ke tracker (sertakan risk_levels untuk TP1/TP2/TP3)
                 tracker.add_position(position_info_bb, risk_levels=risk_levels_bb)
+
+                # ⭐ Catat entry ke session report
+                if session:
+                    session.record_new_entry(
+                        symbol=symbol,
+                        signal=signal_bb,
+                        opened_at=datetime.now().isoformat()
+                    )
+
+                # Update counter directional agar filter berikutnya akurat
+                if signal_bb == "LONG":
+                    long_count += 1
+                elif signal_bb == "SHORT":
+                    short_count += 1
+                open_positions_count += 1
+
                 new_signals.append({
                     'symbol': symbol,
                     'signal': signal_bb,
                     'reasons': reasons_bb,
                     'risk': risk_levels_bb,
                     'position': position_info_bb,
-                    'chart_folder': signal_folder  # ⭐ TAMBAHKAN INFO FOLDER
+                    'chart_folder': signal_folder
                 })
 
 
@@ -622,20 +674,26 @@ def scan_market():
     
     # 7. Save Final State
     tracker.save_positions()
-    
+
     # 8. Print Summary
     summary = tracker.get_summary()
     BotLogger.print_position_summary(summary)
     BotLogger.print_new_signals(new_signals)
 
+    # 9. Print Session Report
+    if session:
+        session.print_summary()
+
 if __name__ == "__main__":
+    session = SessionReport()  # Init sekali saat bot start
     while True:
         try:
-            scan_market()
+            scan_market(session)
             print("\n⏳ Menunggu 100 detik sebelum scan berikutnya...")
             time.sleep(100)
         except KeyboardInterrupt:
             print("\n🛑 Bot dihentikan oleh user")
+            session.print_summary()
             break
         except Exception as e:
             print(f"❌ Error di main loop: {e}")
