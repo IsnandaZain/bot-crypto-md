@@ -408,6 +408,94 @@ Past performance does not guarantee future results.
     return filename
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# SESSION TIME HELPER
+# ─────────────────────────────────────────────────────────────────────────────
+
+def is_active_session() -> bool:
+    """
+    Kembalikan True jika saat ini dalam jam sesi trading aktif.
+    Sesi aktif : 14:00 – 02:00 WIB (hari berikutnya)
+    Off-hours   : 02:00 – 14:00 WIB
+    """
+    h = datetime.now().hour
+    return h >= 14 or h < 2
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MONITOR MODE — hanya cek TP/SL posisi aktif (off-hours, 02:00-14:00)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def monitor_positions(session: SessionReport = None, notifier: TelegramNotifier = None):
+    """
+    Mode monitor (off-hours) — hanya cek TP/SL/partial posisi aktif.
+    Tidak scan sinyal baru. Hemat resource & API quota.
+    """
+    tracker     = PositionTracker()
+    balance_mgr = BalanceManager()
+
+    open_positions = [p for p in tracker.positions if p['status'] == 'OPEN']
+    if not open_positions:
+        print(f"💤 [MONITOR] {datetime.now().strftime('%H:%M:%S')} | Tidak ada posisi aktif")
+        return
+
+    # Connect exchange
+    exchange_mgr = ExchangeManager()
+    exchange     = exchange_mgr.connect()
+    if not exchange:
+        return
+
+    # Fetch harga hanya untuk pair yang punya posisi aktif (hemat quota)
+    open_symbols   = [p['symbol'] for p in open_positions]
+    current_prices = {}
+    for symbol in open_symbols:
+        try:
+            ticker = exchange.fetch_ticker(symbol)
+            current_prices[symbol] = ticker['last']
+        except Exception:
+            pass
+
+    if not current_prices:
+        return
+
+    # ── Monitoring (sama seperti bagian prioritas 1 di scan_market) ──────────
+    tracker.update_unrealized_pnl(current_prices)
+
+    _history_len_before = len(tracker.history)
+    tracker.update_partial_tp(current_prices)
+
+    if notifier:
+        for rec in tracker.history[_history_len_before:]:
+            if rec.get('is_partial'):
+                notifier.notify_partial_tp(rec)
+
+    tracker.update_breakeven_sl(current_prices)
+    closed_positions = tracker.check_tp_sl(current_prices)
+
+    if closed_positions:
+        BotLogger.log_closed_positions(closed_positions)
+        balance_mgr.update_from_closed_positions(closed_positions)
+        if notifier:
+            for rec in closed_positions:
+                notifier.notify_position_closed(rec)
+        if session:
+            session.record_closed(closed_positions)
+
+    if session:
+        new_partials = [r for r in tracker.history[_history_len_before:] if r.get('is_partial')]
+        if new_partials:
+            session.record_closed(new_partials)
+
+    tracker.save_positions()
+
+    open_count = len([p for p in tracker.positions if p['status'] == 'OPEN'])
+    print(
+        f"💤 [MONITOR] {datetime.now().strftime('%H:%M:%S')} "
+        f"| Posisi aktif: {open_count} "
+        f"| Harga dicek: {len(current_prices)}"
+    )
+
+
 def scan_market(session: SessionReport = None, notifier: TelegramNotifier = None):
     print("\n" + "="*70)
     print("🚀 Memulai Multi-Coin MTF Scanner...")
@@ -725,28 +813,56 @@ def scan_market(session: SessionReport = None, notifier: TelegramNotifier = None
         session.print_summary()
 
 if __name__ == "__main__":
-    session  = SessionReport()
     notifier = TelegramNotifier()
 
-    # Ambil info awal untuk notif startup
+    # ⭐ SIGTERM handler — untuk hard stop (server reboot, dll)
+    _stop_flag = {'value': False}
+    def _handle_sigterm(signum, frame):
+        print("\n🛑 Bot dihentikan oleh sistem (SIGTERM)")
+        _stop_flag['value'] = True
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+
+    # State tracking transisi sesi
+    session      = SessionReport()
+    _was_active  = None   # None = belum tahu state awal (siklus pertama)
+
     _init_balance   = BalanceManager().get_balance()
     _init_watchlist = load_watchlist()
     notifier.notify_bot_started(len(_init_watchlist), _init_balance)
 
-    # ⭐ SIGTERM handler — dipanggil saat systemd/cron stop bot (02:00 WIB)
-    def _handle_sigterm(signum, frame):
-        print("\n🛑 Bot dihentikan oleh sistem (SIGTERM)")
-        session.print_summary()
-        notifier.notify_bot_stopped(session)
-        raise SystemExit(0)
-
-    signal.signal(signal.SIGTERM, _handle_sigterm)
-
-    while True:
+    while not _stop_flag['value']:
         try:
-            scan_market(session, notifier)
-            print("\n⏳ Menunggu 100 detik sebelum scan berikutnya...")
-            time.sleep(100)
+            _now_active = is_active_session()
+
+            # ── Deteksi transisi sesi ─────────────────────────────────────────
+            if _was_active is not None and _now_active != _was_active:
+                if _now_active:
+                    # ── 14:00: Sesi aktif dimulai ────────────────────────────
+                    session = SessionReport()
+                    notifier.notify_session_started(
+                        balance     = BalanceManager().get_balance(),
+                        pairs_count = len(load_watchlist())
+                    )
+                else:
+                    # ── 02:00: Sesi aktif berakhir ───────────────────────────
+                    session.print_summary()
+                    notifier.notify_session_ended(session)
+                    # Reset session — aktifitas off-hours tercatat di sesi baru
+                    session = SessionReport()
+
+            _was_active = _now_active
+
+            # ── Jalankan sesuai mode ─────────────────────────────────────────
+            if _now_active:
+                scan_market(session, notifier)
+                interval = 100
+            else:
+                monitor_positions(session, notifier)
+                interval = 200
+
+            print(f"\n⏳ Menunggu {interval} detik...")
+            time.sleep(interval)
+
         except KeyboardInterrupt:
             print("\n🛑 Bot dihentikan oleh user")
             session.print_summary()
@@ -757,3 +873,8 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"❌ Error di main loop: {e}")
             time.sleep(90)
+
+    # Final cleanup saat SIGTERM
+    if _stop_flag['value']:
+        session.print_summary()
+        notifier.notify_bot_stopped(session)

@@ -67,7 +67,7 @@ class TelegramNotifier:
     # ──────────────────────────────────────────────────────────────────────
 
     def notify_bot_started(self, watchlist_count: int, balance: float):
-        """Notifikasi bot mulai jalan."""
+        """Notifikasi bot pertama kali start (service restart / deploy baru)."""
         if not self.enabled:
             return
         text = (
@@ -79,8 +79,31 @@ class TelegramNotifier:
         )
         self.send_message(text)
 
+    def notify_session_started(self, balance: float, pairs_count: int):
+        """Notifikasi sesi trading aktif dimulai (14:00 WIB)."""
+        if not self.enabled:
+            return
+        text = (
+            f"🟢 <b>SESI AKTIF DIMULAI</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"💰 Balance : <code>${balance:.2f} USDT</code>\n"
+            f"📋 Pairs   : {pairs_count} coins\n"
+            f"🕐 {datetime.now().strftime('%d %b %Y %H:%M:%S')}"
+        )
+        self.send_message(text)
+
+    def notify_session_ended(self, session):
+        """Notifikasi sesi trading aktif berakhir (02:00 WIB) + kirim report."""
+        if not self.enabled:
+            return
+        self.send_message(
+            f"🔴 <b>SESI AKTIF BERAKHIR</b> — {datetime.now().strftime('%d %b %H:%M')}\n"
+            f"Bot beralih ke mode monitor (off-hours)"
+        )
+        self.notify_session_report(session)
+
     def notify_bot_stopped(self, session):
-        """Notifikasi bot stop — sekaligus kirim session report."""
+        """Notifikasi bot stop paksa (SIGTERM / Ctrl+C) — kirim session report."""
         if not self.enabled:
             return
         self.send_message(f"🛑 <b>BOT STOPPED</b> — {datetime.now().strftime('%H:%M:%S')}")
