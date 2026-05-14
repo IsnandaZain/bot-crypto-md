@@ -858,7 +858,7 @@ if __name__ == "__main__":
                 interval = 100
             else:
                 monitor_positions(session, notifier)
-                interval = 200
+                interval = 150
 
             print(f"\n⏳ Menunggu {interval} detik...")
             time.sleep(interval)
