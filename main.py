@@ -826,6 +826,10 @@ if __name__ == "__main__":
     session      = SessionReport()
     _was_active  = None   # None = belum tahu state awal (siklus pertama)
 
+    # ⭐ Periodic report tracking (06:00, 12:00, 18:00, 23:00)
+    _REPORT_HOURS   = {6, 12, 18, 23}
+    _reported_hours : set = set()
+
     _init_balance   = BalanceManager().get_balance()
     _init_watchlist = load_watchlist()
     notifier.notify_bot_started(len(_init_watchlist), _init_balance)
@@ -859,6 +863,17 @@ if __name__ == "__main__":
             else:
                 monitor_positions(session, notifier)
                 interval = 150
+
+            # ── Periodic report (setiap 6 jam: 06, 12, 18, 23) ──────────────
+            _current_hour = datetime.now().hour
+            if _current_hour in _REPORT_HOURS and _current_hour not in _reported_hours:
+                _pt      = PositionTracker()
+                _open    = [p for p in _pt.positions if p['status'] == 'OPEN']
+                _balance = BalanceManager().get_balance()
+                notifier.notify_periodic_report(_open, _balance)
+                _reported_hours.add(_current_hour)
+            elif _current_hour not in _REPORT_HOURS:
+                _reported_hours.discard(_current_hour)
 
             print(f"\n⏳ Menunggu {interval} detik...")
             time.sleep(interval)

@@ -216,8 +216,7 @@ class TelegramNotifier:
         self.send_message(text)
 
     def notify_session_report(self, session):
-        """Kirim ringkasan sesi ke Telegram."""
-        if not self.enabled:
+        """Kirim ringkasan sesi ke Telegram."""        if not self.enabled:
             return
 
         sign         = "+" if session.total_pnl_usdt >= 0 else ""
@@ -246,3 +245,65 @@ class TelegramNotifier:
             f"{result_emoji} PnL : <b><code>{sign}${session.total_pnl_usdt:.4f} USDT</code></b>"
         )
         self.send_message(text)
+
+    def notify_periodic_report(self, open_positions: list, balance: float):
+        """
+        Laporan berkala posisi aktif (06:00 / 12:00 / 18:00 / 23:59).
+        Menampilkan detail setiap posisi beserta unrealized PnL.
+        """
+        if not self.enabled:
+            return
+
+        now = datetime.now().strftime('%d %b %H:%M')
+
+        if not open_positions:
+            text = (
+                f"📋 <b>LAPORAN BERKALA</b> — {now}\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"Tidak ada posisi aktif saat ini.\n"
+                f"💰 Balance: <code>${balance:.2f} USDT</code>"
+            )
+            self.send_message(text)
+            return
+
+        total_upnl = sum(p.get('unrealized_pnl', 0) for p in open_positions)
+        total_sign = "+" if total_upnl >= 0 else ""
+
+        lines = [
+            f"📋 <b>LAPORAN BERKALA</b> — {now}",
+            f"💰 Balance : <code>${balance:.2f} USDT</code>",
+            f"📊 Open    : {len(open_positions)} posisi",
+            f"━━━━━━━━━━━━━━━━━━━━",
+        ]
+
+        for pos in open_positions:
+            coin      = pos['symbol'].split('/')[0]
+            signal    = pos['signal']
+            entry     = pos['entry_price']
+            current   = pos.get('current_price', entry)
+            upnl      = pos.get('unrealized_pnl', 0)
+            upnl_pct  = pos.get('unrealized_pnl_pct', 0)
+            tp_stage  = pos.get('tp_stage', 0)
+            sl        = pos['stop_loss']
+            tp1       = pos.get('take_profit_1', pos['take_profit'])
+            tp2       = pos.get('take_profit_2', pos['take_profit'])
+            tp3       = pos.get('take_profit_3', pos['take_profit'])
+            opened_at = pos.get('opened_at', '')[:16].replace('T', ' ')
+
+            sign      = "+" if upnl >= 0 else ""
+            dir_emoji = "📈" if signal == "LONG" else "📉"
+            stage_tag = f" <i>[TP{tp_stage}✓]</i>" if tp_stage > 0 else ""
+
+            lines.append(
+                f"\n{dir_emoji} <b>{coin}</b> {signal}{stage_tag}\n"
+                f"   Buka   : <code>${entry:,.4f}</code>  <i>({opened_at})</i>\n"
+                f"   Kini   : <code>${current:,.4f}</code>\n"
+                f"   uPnL   : <code>{sign}${upnl:.4f}</code>  <i>({sign}{upnl_pct:.1f}%)</i>\n"
+                f"   SL     : <code>${sl:,.4f}</code>\n"
+                f"   TP1/2/3: <code>${tp1:,.4f}</code> / <code>${tp2:,.4f}</code> / <code>${tp3:,.4f}</code>"
+            )
+
+        lines.append(f"\n━━━━━━━━━━━━━━━━━━━━")
+        lines.append(f"💼 Total uPnL : <code>{total_sign}${total_upnl:.4f} USDT</code>")
+
+        self.send_message('\n'.join(lines))
