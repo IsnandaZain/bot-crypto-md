@@ -419,9 +419,9 @@ def is_active_session() -> bool:
     Off-hours   : 02:00 – 14:00 WIB
     """
     h = datetime.now().hour
-    return h >= 14 or h < 2
+    return h >= 12 or h < 3
 
-
+    
 # ─────────────────────────────────────────────────────────────────────────────
 # MONITOR MODE — hanya cek TP/SL posisi aktif (off-hours, 02:00-14:00)
 # ─────────────────────────────────────────────────────────────────────────────
