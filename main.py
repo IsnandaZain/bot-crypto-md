@@ -642,6 +642,22 @@ def scan_market(session: SessionReport = None):
                 # Tambahkan ke tracker (sertakan risk_levels untuk TP1/TP2/TP3)
                 tracker.add_position(position_info_bb, risk_levels=risk_levels_bb)
 
+                # ⭐ Pasang SL/TP orders ke exchange
+                # paper=True: hanya log (tidak kirim ke Bybit)
+                # Ubah paper=False saat siap live trading
+                from core.exchange import place_sl_tp_orders
+                place_sl_tp_orders(
+                    symbol        = symbol,
+                    signal        = signal_bb,
+                    qty           = position_info_bb['quantity'],
+                    entry_price   = risk_levels_bb['entry'],
+                    stop_loss     = risk_levels_bb['stop_loss'],
+                    take_profit_1 = risk_levels_bb['take_profit_1'],
+                    take_profit_2 = risk_levels_bb['take_profit_2'],
+                    take_profit_3 = risk_levels_bb['take_profit_3'],
+                    paper         = True
+                )
+
                 # ⭐ Catat entry ke session report
                 if session:
                     session.record_new_entry(

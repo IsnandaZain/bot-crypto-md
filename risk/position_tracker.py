@@ -194,17 +194,59 @@ class PositionTracker:
                         f"| SL {old_sl:.6f} → {new_sl:.6f} (+{sl_profit_margin_pct*100:.0f}% margin)"
                     )
 
-            # ── STAGE 1 → 2: TP2 tercapai ─────────────────────────────────
+            # ── STAGE 1 → 2: TP2 tercapai → partial close 50% sisa + SL ke TP1 ──
             elif tp_stage == 1:
                 tp2_hit = (signal == 'LONG'  and current_price >= tp2) or \
                           (signal == 'SHORT' and current_price <= tp2)
 
                 if tp2_hit:
-                    pos['tp_stage'] = 2  # check_tp_sl() akan tutup semua sisa
+                    # Tutup 50% dari sisa qty (sisa sudah 50% sejak TP1)
+                    qty_close    = pos['quantity'] * 0.50
+                    qty_remain   = pos['quantity'] - qty_close
+                    margin_close = pos['margin_required'] * 0.50
+
+                    # Hitung PnL partial TP2
+                    pnl_partial = self._calculate_pnl_partial(pos, tp2, qty_close)
+
+                    # Catat partial close di history
+                    partial_record = {
+                        'symbol'           : pos['symbol'],
+                        'signal'           : signal,
+                        'entry_price'      : entry,
+                        'exit_price'       : tp2,
+                        'quantity'         : qty_close,
+                        'pnl_usdt'         : pnl_partial,
+                        'pnl_pct'          : (pnl_partial / margin_close * 100) if margin_close > 0 else 0,
+                        'opened_at'        : pos['opened_at'],
+                        'closed_at'        : datetime.now().isoformat(),
+                        'exit_reason'      : 'TP2_PARTIAL_50PCT',
+                        'tp_stage_at_close': 2,
+                        'method'           : pos['method'],
+                        'is_partial'       : True
+                    }
+                    self.history.append(partial_record)
+
+                    # Update posisi — kurangi qty dan margin
+                    pos['quantity']        = qty_remain
+                    pos['margin_required'] = pos['margin_required'] * 0.50
+                    pos['tp_stage']        = 2
+
+                    # Geser SL ke TP1 (lock profit TP1 untuk sisa posisi)
+                    tp1_price = pos.get('take_profit_1', pos['take_profit'])
+                    old_sl    = pos['stop_loss']
+                    sl_valid  = (signal == 'LONG'  and tp1_price > old_sl) or \
+                                (signal == 'SHORT' and tp1_price < old_sl)
+                    if sl_valid:
+                        pos['stop_loss'] = tp1_price
+
+                    self._execute_partial_close_order(pos['symbol'], signal, qty_close, tp2, paper=True)
+
                     updated.append(pos['symbol'])
                     print(
-                        f"🎯 TP2 REACHED: {pos['symbol']} {signal} @ {current_price:.6f} "
-                        f"| Sisa posisi akan ditutup penuh"
+                        f"🎯 TP2 PARTIAL: {pos['symbol']} {signal} @ {current_price:.6f} "
+                        f"| Tutup 50% sisa (qty={qty_close:.6f}) "
+                        f"| PnL: ${pnl_partial:.4f} "
+                        f"| SL {old_sl:.6f} → {tp1_price:.6f} (lock @ TP1)"
                     )
 
         if updated:
@@ -366,7 +408,11 @@ class PositionTracker:
                 # Label exit reason lebih spesifik untuk partial flow
                 tp_stage_now = pos.get('tp_stage', 0)
                 if exit_reason == 'TP_HIT' and tp_stage_now >= 2:
-                    exit_reason = 'TP2_FINAL_CLOSE'
+                    exit_reason = 'TP3_FINAL_CLOSE'
+                elif exit_reason == 'TP3_HIT':
+                    exit_reason = 'TP3_FINAL_CLOSE'
+                elif exit_reason == 'SL_HIT' and tp_stage_now >= 2:
+                    exit_reason = 'SL_HIT_AFTER_TP2'
                 elif exit_reason == 'SL_HIT' and tp_stage_now >= 1:
                     exit_reason = 'SL_HIT_AFTER_TP1'
 

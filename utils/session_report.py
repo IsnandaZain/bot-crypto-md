@@ -30,8 +30,9 @@ class SessionReport:
 
         # Counter per exit category
         self.tp1_hit        = 0   # TP1_PARTIAL_50PCT
-        self.tp2_hit        = 0   # TP2_FINAL_CLOSE
-        self.breakeven_hit  = 0   # SL_HIT_AFTER_TP1  (10% margin profit)
+        self.tp2_hit        = 0   # TP2_PARTIAL_50PCT
+        self.tp3_hit        = 0   # TP3_FINAL_CLOSE
+        self.breakeven_hit  = 0   # SL_HIT_AFTER_TP1 / SL_HIT_AFTER_TP2
         self.sl_hit         = 0   # SL_HIT langsung (sebelum TP1)
         self.auto_tp_hit    = 0   # AUTO_TP_HIT (>150% equity)
 
@@ -72,13 +73,16 @@ class SessionReport:
 
             if exit_reason == 'TP1_PARTIAL_50PCT':
                 self.tp1_hit += 1
-            elif exit_reason == 'TP2_FINAL_CLOSE':
+            elif exit_reason == 'TP2_PARTIAL_50PCT':
                 self.tp2_hit += 1
+            elif exit_reason == 'TP3_FINAL_CLOSE':
+                self.tp3_hit += 1
+            elif exit_reason == 'SL_HIT_AFTER_TP2':
+                self.breakeven_hit += 1   # SL di TP1 price setelah TP2 → masih profit
             elif exit_reason == 'SL_HIT_AFTER_TP1':
-                self.breakeven_hit += 1
-            elif exit_reason in ('SL_HIT', 'SL_HIT_AFTER_TP1'):
-                if exit_reason == 'SL_HIT':
-                    self.sl_hit += 1
+                self.breakeven_hit += 1   # SL di +10% margin setelah TP1
+            elif exit_reason == 'SL_HIT':
+                self.sl_hit += 1
             elif exit_reason == 'AUTO_TP_HIT':
                 self.auto_tp_hit += 1
 
@@ -94,9 +98,10 @@ class SessionReport:
         print(f"  Durasi        : {duration}")
         print("-" * 60)
         print(f"  Total Entry   : {self.total_entries}")
-        print(f"  Hit TP1       : {self.tp1_hit}  (partial 50% closed)")
-        print(f"  Hit TP2       : {self.tp2_hit}  (full close)")
-        print(f"  Breakeven 10% : {self.breakeven_hit}  (SL after TP1)")
+        print(f"  Hit TP1       : {self.tp1_hit}  (partial 50% closed @ TP1)")
+        print(f"  Hit TP2       : {self.tp2_hit}  (partial 50% closed @ TP2)")
+        print(f"  Hit TP3       : {self.tp3_hit}  (full close sisa @ TP3)")
+        print(f"  Breakeven+    : {self.breakeven_hit}  (SL after TP1/TP2, masih profit)")
         print(f"  Hit SL        : {self.sl_hit}  (langsung sebelum TP1)")
         print(f"  Auto TP       : {self.auto_tp_hit}  (>150% equity)")
         print("-" * 60)
@@ -122,6 +127,7 @@ class SessionReport:
             'total_entries'  : self.total_entries,
             'tp1_hit'        : self.tp1_hit,
             'tp2_hit'        : self.tp2_hit,
+            'tp3_hit'        : self.tp3_hit,
             'breakeven_hit'  : self.breakeven_hit,
             'sl_hit'         : self.sl_hit,
             'auto_tp_hit'    : self.auto_tp_hit,

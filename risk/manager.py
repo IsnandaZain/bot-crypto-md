@@ -159,31 +159,32 @@ class RiskManager:
         """
         Hitung 3 level TP berdasarkan struktur harga dan BB.
 
-        TP1 (Konservatif) — Mean Reversion Target:
-            Snap ke BB Mid jika BB Mid jatuh antara entry dan TP2.
-            Ideal untuk partial close atau pair yang sering berbalik di BB Mid.
-            Fallback: entry ± 1× risk_distance.
+        TP1 (Konservatif):
+            floor min(BB Mid, entry ± tp1_floor_pct).
+            Default floor 2%.
 
-        TP2 (Standard) — Core RR Target:
-            entry ± rr_ratio × risk_distance (default 2×).
-            Target utama posisi.
+        TP2 (Standard):
+            max(tp2_floor_pct, 1.5× risk_distance) dari entry.
+            Default floor 4%.
 
-        TP3 (Max) — Extended Target:
-            entry ± (rr_ratio + 1)× risk_distance.
-            Snap ke BB band berlawanan jika band tersebut lebih konservatif dari target,
-            karena band berlawanan adalah batas atas/bawah natural Bollinger.
+        TP3 (Extended):
+            max(tp3_floor_pct, 2.5× risk_distance) dari entry.
+            Default floor 6%.
+            Di-cap ke BB band berlawanan jika TP3 melewati band.
 
-        Ordering selalu dijaga: untuk SHORT TP3 < TP2 < TP1, untuk LONG TP1 < TP2 < TP3.
+        Ordering selalu dijaga: LONG TP1 < TP2 < TP3, SHORT TP3 < TP2 < TP1.
         """
         entry     = self.price
         direction = 1 if self.signal == "LONG" else -1
-        rr_ratio  = self.cfg['rr_ratio']
-        bb_buf    = 0.002  # 0.2% buffer agar tidak tepat di level BB (hindari spread)
+        bb_buf    = 0.002
 
-        # ── Base targets dari kelipatan risk_distance ────────────────────────
+        # ── Floor percentages dari config ────────────────────────────────────
+        tp1_floor_pct = self.cfg.get('tp1_floor_pct', 0.02)
+        tp2_floor_pct = self.cfg.get('tp2_floor_pct', 0.04)
+        tp3_floor_pct = self.cfg.get('tp3_floor_pct', 0.06)
+
+        # ── TP1: min(BB Mid, floor 2%) ───────────────────────────────────────
         tp1_raw = entry + direction * risk_distance * 1.0
-        tp2_raw = entry + direction * risk_distance * rr_ratio
-        tp3_raw = entry + direction * risk_distance * (rr_ratio + 1.0)
 
         # ── Baca BB columns dari closed candle ───────────────────────────────
         bb_mid   = float('nan')
@@ -195,37 +196,42 @@ class RiskManager:
             bb_upper = last.get('bb_upper', float('nan'))
             bb_lower = last.get('bb_lower', float('nan'))
 
-        # ── TP1: snap ke BB Mid jika BB Mid berada antara entry dan TP2 ──────
-        # BB Mid adalah magnet mean reversion paling dekat — jadikan TP1 yang realistis.
+        # Snap TP1 ke BB Mid jika BB Mid berada antara entry dan TP2 raw
+        tp2_ref = entry + direction * risk_distance * 1.5
         if not pd.isna(bb_mid):
-            if self.signal == "SHORT" and tp2_raw < bb_mid < entry:
-                tp1_raw = bb_mid * (1 - bb_buf)
-            elif self.signal == "LONG" and entry < bb_mid < tp2_raw:
+            if self.signal == "LONG" and entry < bb_mid < tp2_ref:
                 tp1_raw = bb_mid * (1 + bb_buf)
+            elif self.signal == "SHORT" and tp2_ref < bb_mid < entry:
+                tp1_raw = bb_mid * (1 - bb_buf)
 
-        # ── TP1 floor: minimum 2% dari entry (setara 40% gain di leverage 20x) ──
-        # Ambil yang lebih dekat ke entry antara hasil BB Mid dan floor 2%.
-        # Mencegah TP1 terlalu jauh saat BB Mid ada di posisi ambisius.
-        tp1_floor_pct = self.cfg.get('tp1_floor_pct', 0.02)  # default 2%
+        # Floor TP1: ambil yang lebih dekat ke entry
         tp1_floor = entry * (1 + tp1_floor_pct) if self.signal == "LONG" else entry * (1 - tp1_floor_pct)
         if self.signal == "LONG":
-            # Ambil yang lebih dekat ke entry (lebih kecil)
-            if tp1_raw > tp1_floor:
-                tp1_raw = tp1_floor
+            tp1_raw = min(tp1_raw, tp1_floor)
         else:
-            # SHORT: ambil yang lebih dekat ke entry (lebih besar)
-            if tp1_raw < tp1_floor:
-                tp1_raw = tp1_floor
+            tp1_raw = max(tp1_raw, tp1_floor)
 
-        # ── TP3: snap ke BB band berlawanan jika calculated TP3 melewati band──
-        # BB band berlawanan adalah batas natural volatilitas.
-        # Jika TP3 lebih ambisius dari band, tarik ke band (lebih konservatif & realistis).
+        # ── TP2: max(floor 4%, 1.5× risk_distance) ──────────────────────────
+        tp2_proportional = entry + direction * risk_distance * 1.5
+        tp2_floor        = entry + direction * entry * tp2_floor_pct
+        if self.signal == "LONG":
+            tp2_raw = max(tp2_proportional, tp2_floor)
+        else:
+            tp2_raw = min(tp2_proportional, tp2_floor)
+
+        # ── TP3: max(floor 6%, 2.5× risk_distance) ──────────────────────────
+        tp3_proportional = entry + direction * risk_distance * 2.5
+        tp3_floor        = entry + direction * entry * tp3_floor_pct
+        if self.signal == "LONG":
+            tp3_raw = max(tp3_proportional, tp3_floor)
+        else:
+            tp3_raw = min(tp3_proportional, tp3_floor)
+
+        # Cap TP3 ke BB band berlawanan jika melewati band
         if self.signal == "SHORT" and not pd.isna(bb_lower):
-            # SHORT target harga turun; BB Lower = support natural, jangan lampaui
             if tp3_raw <= bb_lower:
                 tp3_raw = bb_lower * (1 - bb_buf)
         elif self.signal == "LONG" and not pd.isna(bb_upper):
-            # LONG target harga naik; BB Upper = resistance natural, jangan lampaui
             if tp3_raw >= bb_upper:
                 tp3_raw = bb_upper * (1 + bb_buf)
 
@@ -236,11 +242,9 @@ class RiskManager:
 
         # ── Pastikan urutan TP tidak terbalik akibat adjustment ──────────────
         if self.signal == "SHORT":
-            # Harga turun: TP3 < TP2 < TP1 (dalam nilai absolut)
             tp2 = min(tp2, tp1)
             tp3 = min(tp3, tp2)
         else:
-            # Harga naik: TP1 < TP2 < TP3 (dalam nilai absolut)
             tp2 = max(tp2, tp1)
             tp3 = max(tp3, tp2)
 

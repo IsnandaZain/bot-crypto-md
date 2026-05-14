@@ -91,10 +91,12 @@ RISK_CONFIG = {
     
     # ⭐ TP Minimum Guardrail (BARU)
     'tp_min_pct': 0.010,               # TP minimal 1% dari entry
-    # ⭐ TP1 FLOOR — minimum gain TP1 terhadap entry price
-    # 2% harga = 40% gain dengan leverage 20x
-    # TP1 akan diambil yang lebih dekat ke entry antara BB Mid dan floor ini
-    'tp1_floor_pct': 0.02,             # 2% dari entry
+
+    # ⭐ TP FLOOR — fixed minimum per level (Opsi B hybrid)
+    # TP = max(floor%, proportional × risk_distance)
+    'tp1_floor_pct': 0.02,             # TP1 min 2%  dari entry (=40% margin @ lev 20x)
+    'tp2_floor_pct': 0.04,             # TP2 min 4%  dari entry (=80% margin @ lev 20x)
+    'tp3_floor_pct': 0.06,             # TP3 min 6%  dari entry (=120% margin @ lev 20x)
     # ⭐ BREAKEVEN SL CONFIG
     # Saat unrealized profit (dalam % equity) mencapai threshold ini,
     # SL otomatis digeser ke entry price + buffer kecil untuk cover fee.
