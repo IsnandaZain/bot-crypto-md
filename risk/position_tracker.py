@@ -117,7 +117,7 @@ class PositionTracker:
             return []
 
         partial_close_pct    = RISK_CONFIG.get('tp1_partial_close_pct', 0.50)
-        sl_profit_margin_pct = RISK_CONFIG.get('tp1_sl_profit_margin_pct', 0.10)
+        sl_profit_margin_pct = RISK_CONFIG.get('tp1_sl_profit_margin_pct', 0.20)
         updated              = []
 
         for pos in self.positions:
