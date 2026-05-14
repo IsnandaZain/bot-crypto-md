@@ -216,7 +216,8 @@ class TelegramNotifier:
         self.send_message(text)
 
     def notify_session_report(self, session):
-        """Kirim ringkasan sesi ke Telegram."""        if not self.enabled:
+        """Kirim ringkasan sesi ke Telegram."""
+        if not self.enabled:
             return
 
         sign         = "+" if session.total_pnl_usdt >= 0 else ""
