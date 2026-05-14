@@ -155,6 +155,7 @@ class PositionTracker:
                         'entry_price'  : entry,
                         'exit_price'   : tp1,
                         'quantity'     : qty_close,
+                        'qty_remain'   : qty_remain,
                         'pnl_usdt'     : pnl_partial,
                         'pnl_pct'      : (pnl_partial / margin_close * 100) if margin_close > 0 else 0,
                         'opened_at'    : pos['opened_at'],
@@ -162,7 +163,8 @@ class PositionTracker:
                         'exit_reason'  : 'TP1_PARTIAL_50PCT',
                         'tp_stage_at_close': 1,
                         'method'       : pos['method'],
-                        'is_partial'   : True
+                        'is_partial'   : True,
+                        'new_sl'       : None   # di-set setelah SL baru dihitung
                     }
                     self.history.append(partial_record)
 
@@ -182,6 +184,7 @@ class PositionTracker:
                                (signal == 'SHORT' and new_sl < old_sl)
                     if sl_valid:
                         pos['stop_loss'] = new_sl
+                        partial_record['new_sl'] = new_sl
 
                     # Stub eksekusi real order (aktifkan saat live trading)
                     self._execute_partial_close_order(pos['symbol'], signal, qty_close, tp1, paper=True)
@@ -215,6 +218,7 @@ class PositionTracker:
                         'entry_price'      : entry,
                         'exit_price'       : tp2,
                         'quantity'         : qty_close,
+                        'qty_remain'       : qty_remain,
                         'pnl_usdt'         : pnl_partial,
                         'pnl_pct'          : (pnl_partial / margin_close * 100) if margin_close > 0 else 0,
                         'opened_at'        : pos['opened_at'],
@@ -222,7 +226,8 @@ class PositionTracker:
                         'exit_reason'      : 'TP2_PARTIAL_50PCT',
                         'tp_stage_at_close': 2,
                         'method'           : pos['method'],
-                        'is_partial'       : True
+                        'is_partial'       : True,
+                        'new_sl'           : None   # di-set setelah SL baru dihitung
                     }
                     self.history.append(partial_record)
 
@@ -238,6 +243,7 @@ class PositionTracker:
                                 (signal == 'SHORT' and tp1_price < old_sl)
                     if sl_valid:
                         pos['stop_loss'] = tp1_price
+                        partial_record['new_sl'] = tp1_price
 
                     self._execute_partial_close_order(pos['symbol'], signal, qty_close, tp2, paper=True)
 

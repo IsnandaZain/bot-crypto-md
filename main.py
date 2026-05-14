@@ -1,5 +1,6 @@
 # main.py
 import time
+import signal
 from core.exchange import ExchangeManager
 from core.data_fetcher import DataFetcher
 
@@ -10,6 +11,7 @@ from risk.balance_manager import BalanceManager  # ⭐ Balance dinamis
 from utils.logger import BotLogger
 from utils.file_manager import get_today_folder, create_signal_folder
 from utils.session_report import SessionReport
+from utils.telegram_notifier import TelegramNotifier
 
 from strategy.mtf_confluence import MTFConfluence
 from strategy.mtf_confluence_bb import MTFConfluenceBB
@@ -406,7 +408,7 @@ Past performance does not guarantee future results.
     return filename
 
 
-def scan_market(session: SessionReport = None):
+def scan_market(session: SessionReport = None, notifier: TelegramNotifier = None):
     print("\n" + "="*70)
     print("🚀 Memulai Multi-Coin MTF Scanner...")
     print("="*70)
@@ -448,7 +450,17 @@ def scan_market(session: SessionReport = None):
     print("="*70)
     
     tracker.update_unrealized_pnl(current_prices)
+
+    # Catat panjang history sebelum update_partial_tp untuk deteksi record baru
+    _history_len_before = len(tracker.history)
     tracker.update_partial_tp(current_prices)
+
+    # ⭐ Notifikasi partial TP (TP1 / TP2) yang baru ter-trigger
+    if notifier:
+        for rec in tracker.history[_history_len_before:]:
+            if rec.get('is_partial'):
+                notifier.notify_partial_tp(rec)
+
     tracker.update_breakeven_sl(current_prices)
     closed_positions = tracker.check_tp_sl(current_prices)
 
@@ -459,17 +471,20 @@ def scan_market(session: SessionReport = None):
         balance_mgr.update_from_closed_positions(closed_positions)
         # Refresh balance untuk scan berikutnya
         account_balance = balance_mgr.get_balance()
+        # ⭐ Notifikasi posisi yang fully closed
+        if notifier:
+            for rec in closed_positions:
+                notifier.notify_position_closed(rec)
         # ⭐ Catat ke session report
         if session:
             session.record_closed(closed_positions)
 
-    # ⭐ Catat partial TP records ke session report (TP1 partial dari update_partial_tp)
+    # ⭐ Catat partial TP records ke session report (TP1 & TP2 partial dari update_partial_tp)
     if session:
-        partial_records = [r for r in tracker.history if r.get('is_partial') and
-                           r.get('exit_reason') == 'TP1_PARTIAL_50PCT' and
-                           r not in getattr(session, '_records', [])]
-        if partial_records:
-            session.record_closed(partial_records)
+        new_partial_records = [r for r in tracker.history[_history_len_before:]
+                               if r.get('is_partial')]
+        if new_partial_records:
+            session.record_closed(new_partial_records)
     
     # 6. ⭐ PRIORITAS 2: Cek Sinyal Baru (Hanya Jika Ada Slot)
     print("\n" + "="*70)
@@ -642,6 +657,15 @@ def scan_market(session: SessionReport = None):
                 # Tambahkan ke tracker (sertakan risk_levels untuk TP1/TP2/TP3)
                 tracker.add_position(position_info_bb, risk_levels=risk_levels_bb)
 
+                # ⭐ Notifikasi entry baru ke Telegram
+                if notifier:
+                    notifier.notify_new_entry(
+                        symbol        = symbol,
+                        signal        = signal_bb,
+                        risk_levels   = risk_levels_bb,
+                        position_info = position_info_bb
+                    )
+
                 # ⭐ Pasang SL/TP orders ke exchange
                 # paper=True: hanya log (tidak kirim ke Bybit)
                 # Ubah paper=False saat siap live trading
@@ -701,15 +725,34 @@ def scan_market(session: SessionReport = None):
         session.print_summary()
 
 if __name__ == "__main__":
-    session = SessionReport()  # Init sekali saat bot start
+    session  = SessionReport()
+    notifier = TelegramNotifier()
+
+    # Ambil info awal untuk notif startup
+    _init_balance   = BalanceManager().get_balance()
+    _init_watchlist = load_watchlist()
+    notifier.notify_bot_started(len(_init_watchlist), _init_balance)
+
+    # ⭐ SIGTERM handler — dipanggil saat systemd/cron stop bot (02:00 WIB)
+    def _handle_sigterm(signum, frame):
+        print("\n🛑 Bot dihentikan oleh sistem (SIGTERM)")
+        session.print_summary()
+        notifier.notify_bot_stopped(session)
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+
     while True:
         try:
-            scan_market(session)
+            scan_market(session, notifier)
             print("\n⏳ Menunggu 100 detik sebelum scan berikutnya...")
             time.sleep(100)
         except KeyboardInterrupt:
             print("\n🛑 Bot dihentikan oleh user")
             session.print_summary()
+            notifier.notify_bot_stopped(session)
+            break
+        except SystemExit:
             break
         except Exception as e:
             print(f"❌ Error di main loop: {e}")

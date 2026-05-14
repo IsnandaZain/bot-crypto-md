@@ -121,3 +121,17 @@ STORAGE_CONFIG = {
     'max_history_records': 100,
 }
 
+# ⭐ TELEGRAM NOTIFICATION CONFIG
+# Setup:
+#   1. Buat bot via @BotFather → dapat bot_token
+#   2. Kirim /start ke bot, lalu buka:
+#      https://api.telegram.org/bot<TOKEN>/getUpdates
+#      → ambil "chat":{"id": ...} sebagai chat_id
+#   3. Isi bot_token dan chat_id di bawah
+#   4. Set 'enabled': True
+TELEGRAM_CONFIG = {
+    'enabled'   : True,   # ← set True setelah isi token & chat_id
+    'bot_token' : '7708180192:AAHwv2HqJaonbeFonOYE8onJvnvBJ90jh-g',      # contoh: '7123456789:AAFxxxx...'
+    'chat_id'   : '569119115',      # contoh: '123456789' atau '-100xxxxxxxxx' (channel)
+}
+
