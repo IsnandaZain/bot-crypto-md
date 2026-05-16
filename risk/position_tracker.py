@@ -236,14 +236,18 @@ class PositionTracker:
                     pos['margin_required'] = pos['margin_required'] * 0.50
                     pos['tp_stage']        = 2
 
-                    # Geser SL ke TP1 (lock profit TP1 untuk sisa posisi)
-                    tp1_price = pos.get('take_profit_1', pos['take_profit'])
-                    old_sl    = pos['stop_loss']
-                    sl_valid  = (signal == 'LONG'  and tp1_price > old_sl) or \
-                                (signal == 'SHORT' and tp1_price < old_sl)
+                    # Geser SL ke midpoint antara TP1 dan TP2 (lebih konservatif dari TP1)
+                    tp1_price   = pos.get('take_profit_1', pos['take_profit'])
+                    midpoint_sl = (tp1_price + tp2) / 2
+                    old_sl      = pos['stop_loss']
+                    sl_valid    = (signal == 'LONG'  and midpoint_sl > old_sl) or \
+                                  (signal == 'SHORT' and midpoint_sl < old_sl)
                     if sl_valid:
-                        pos['stop_loss'] = tp1_price
-                        partial_record['new_sl'] = tp1_price
+                        pos['stop_loss'] = midpoint_sl
+                        partial_record['new_sl'] = midpoint_sl
+
+                    # Simpan referensi trailing: harga TP2 sebagai titik awal trailing
+                    pos['trailing_sl_ref'] = tp2
 
                     self._execute_partial_close_order(pos['symbol'], signal, qty_close, tp2, paper=True)
 
@@ -252,7 +256,8 @@ class PositionTracker:
                         f"🎯 TP2 PARTIAL: {pos['symbol']} {signal} @ {current_price:.6f} "
                         f"| Tutup 50% sisa (qty={qty_close:.6f}) "
                         f"| PnL: ${pnl_partial:.4f} "
-                        f"| SL {old_sl:.6f} → {tp1_price:.6f} (lock @ TP1)"
+                        f"| SL {old_sl:.6f} → {midpoint_sl:.6f} (midpoint TP1-TP2) "
+                        f"| Trailing ref: {tp2:.6f} (TP2)"
                     )
 
         if updated:
@@ -299,14 +304,12 @@ class PositionTracker:
 
     def update_breakeven_sl(self, current_prices):
         """
-        Geser SL ke breakeven (entry + buffer fee) saat posisi sudah
-        mencapai profit threshold tertentu.
+        1. Breakeven: geser SL ke entry+buffer saat profit cukup (sekali saja).
+        2. Trailing SL: aktif setelah TP2 hit (tp_stage==2) — setiap harga naik
+           1% dari trailing_sl_ref, SL naik 0.5% dari trailing_sl_ref.
+           Trailing ref awal = harga TP2 saat TP2 di-hit.
 
         Dipanggil setiap scan cycle sebelum check_tp_sl().
-        Hanya aktif sekali per posisi (field 'breakeven_triggered').
-
-        Threshold: unrealized_pnl_pct >= breakeven_profit_trigger_pct
-        Buffer   : entry × breakeven_fee_buffer (untuk cover biaya penutupan)
         """
         from config import RISK_CONFIG
 
@@ -318,39 +321,84 @@ class PositionTracker:
         for pos in self.positions:
             if pos['status'] != 'OPEN':
                 continue
-            if pos.get('breakeven_triggered', False):
-                continue
             if pos['symbol'] not in current_prices:
                 continue
 
-            if pos['unrealized_pnl_pct'] >= trigger_pct:
-                entry      = pos['entry_price']
-                signal     = pos['signal']
-                fee_amount = entry * fee_buffer
+            current_price = current_prices[pos['symbol']]
+            signal        = pos['signal']
 
-                # LONG: SL naik ke entry + buffer (pastikan tidak rugi setelah fee)
-                # SHORT: SL turun ke entry - buffer
+            # ── 1. Breakeven (hanya untuk posisi yang belum pernah di-trigger) ──
+            if not pos.get('breakeven_triggered', False):
+                if pos['unrealized_pnl_pct'] >= trigger_pct:
+                    entry      = pos['entry_price']
+                    fee_amount = entry * fee_buffer
+
+                    if signal == 'LONG':
+                        new_sl = entry + fee_amount
+                        if new_sl <= pos['stop_loss']:
+                            pass
+                        else:
+                            old_sl = pos['stop_loss']
+                            pos['stop_loss']           = new_sl
+                            pos['breakeven_triggered'] = True
+                            updated.append(pos['symbol'])
+                            print(
+                                f"🔒 BREAKEVEN SL: {pos['symbol']} {signal} "
+                                f"| Profit {pos['unrealized_pnl_pct']:.1f}% ≥ {trigger_pct}% "
+                                f"| SL {old_sl:.6f} → {new_sl:.6f} (entry+fee)"
+                            )
+                    else:  # SHORT
+                        new_sl = entry - fee_amount
+                        if new_sl >= pos['stop_loss']:
+                            pass
+                        else:
+                            old_sl = pos['stop_loss']
+                            pos['stop_loss']           = new_sl
+                            pos['breakeven_triggered'] = True
+                            updated.append(pos['symbol'])
+                            print(
+                                f"🔒 BREAKEVEN SL: {pos['symbol']} {signal} "
+                                f"| Profit {pos['unrealized_pnl_pct']:.1f}% ≥ {trigger_pct}% "
+                                f"| SL {old_sl:.6f} → {new_sl:.6f} (entry-fee)"
+                            )
+
+            # ── 2. Trailing SL (aktif setelah TP2 hit, tp_stage == 2) ──────────
+            if pos.get('tp_stage', 0) == 2 and pos.get('trailing_sl_ref') is not None:
+                trailing_ref = pos['trailing_sl_ref']
+
                 if signal == 'LONG':
-                    new_sl = entry + fee_amount
-                    # Pastikan SL baru lebih tinggi dari SL lama (tidak mundur)
-                    if new_sl <= pos['stop_loss']:
-                        continue
+                    trigger_price = trailing_ref * 1.01          # +1% dari ref
+                    if current_price >= trigger_price:
+                        sl_delta = trailing_ref * 0.005          # +0.5% dari ref
+                        new_sl   = pos['stop_loss'] + sl_delta
+                        if new_sl > pos['stop_loss']:            # SL hanya boleh naik
+                            old_sl = pos['stop_loss']
+                            pos['stop_loss']       = round(new_sl, 8)
+                            pos['trailing_sl_ref'] = trailing_ref * 1.01  # geser ref
+                            if pos['symbol'] not in updated:
+                                updated.append(pos['symbol'])
+                            print(
+                                f"🔀 TRAILING SL: {pos['symbol']} LONG "
+                                f"| Ref {trailing_ref:.6f} → {pos['trailing_sl_ref']:.6f} "
+                                f"| SL {old_sl:.6f} → {new_sl:.6f} (+{sl_delta:.6f})"
+                            )
+
                 else:  # SHORT
-                    new_sl = entry - fee_amount
-                    # Pastikan SL baru lebih rendah dari SL lama (tidak mundur)
-                    if new_sl >= pos['stop_loss']:
-                        continue
-
-                old_sl = pos['stop_loss']
-                pos['stop_loss']           = new_sl
-                pos['breakeven_triggered'] = True
-
-                updated.append(pos['symbol'])
-                print(
-                    f"🔒 BREAKEVEN SL: {pos['symbol']} {signal} "
-                    f"| Profit {pos['unrealized_pnl_pct']:.1f}% ≥ {trigger_pct}% "
-                    f"| SL {old_sl:.6f} → {new_sl:.6f} (entry±fee)"
-                )
+                    trigger_price = trailing_ref * 0.99          # -1% dari ref
+                    if current_price <= trigger_price:
+                        sl_delta = trailing_ref * 0.005          # 0.5% dari ref
+                        new_sl   = pos['stop_loss'] - sl_delta
+                        if new_sl < pos['stop_loss']:            # SL hanya boleh turun
+                            old_sl = pos['stop_loss']
+                            pos['stop_loss']       = round(new_sl, 8)
+                            pos['trailing_sl_ref'] = trailing_ref * 0.99  # geser ref
+                            if pos['symbol'] not in updated:
+                                updated.append(pos['symbol'])
+                            print(
+                                f"🔀 TRAILING SL: {pos['symbol']} SHORT "
+                                f"| Ref {trailing_ref:.6f} → {pos['trailing_sl_ref']:.6f} "
+                                f"| SL {old_sl:.6f} → {new_sl:.6f} (-{sl_delta:.6f})"
+                            )
 
         if updated:
             self.save_positions()

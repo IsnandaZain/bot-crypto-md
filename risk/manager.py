@@ -248,6 +248,15 @@ class RiskManager:
             tp2 = max(tp2, tp1)
             tp3 = max(tp3, tp2)
 
+        # ── Enforce minimum gap TP2 → TP3 (cegah TP2 = TP3 akibat BB cap) ────
+        # BB cap bisa menarik TP3 ke bawah TP2, lalu ordering meratakannya.
+        # Tanpa gap ini, trailing SL setelah TP2 tidak pernah sempat berjalan.
+        min_gap_pct = self.cfg.get('tp3_min_gap_pct', 0.02)
+        if self.signal == "SHORT":
+            tp3 = min(tp3, tp2 * (1 - min_gap_pct))
+        else:
+            tp3 = max(tp3, tp2 * (1 + min_gap_pct))
+
         return tp1, tp2, tp3
 
     def calculate_levels(self):

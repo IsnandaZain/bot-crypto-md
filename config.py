@@ -97,6 +97,7 @@ RISK_CONFIG = {
     'tp1_floor_pct': 0.02,             # TP1 min 2%  dari entry (=40% margin @ lev 20x)
     'tp2_floor_pct': 0.04,             # TP2 min 4%  dari entry (=80% margin @ lev 20x)
     'tp3_floor_pct': 0.06,             # TP3 min 6%  dari entry (=120% margin @ lev 20x)
+    'tp3_min_gap_pct': 0.02,           # TP3 harus min 2% lebih jauh dari TP2 (anti TP2=TP3)
     # ⭐ BREAKEVEN SL CONFIG
     # Saat unrealized profit (dalam % equity) mencapai threshold ini,
     # SL otomatis digeser ke entry price + buffer kecil untuk cover fee.
