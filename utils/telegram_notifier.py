@@ -310,3 +310,33 @@ class TelegramNotifier:
         lines.append(f"💼 Total uPnL : <code>{total_sign}${total_upnl:.4f} USDT</code>")
 
         self.send_message('\n'.join(lines))
+
+    def notify_watchlist_updated(self, added: list, removed: list, final: list):
+        """Notifikasi setelah auto-update watchlist jam 07:00."""
+        if not self.enabled:
+            return
+
+        now = datetime.now().strftime('%d %b %H:%M')
+
+        if not added and not removed:
+            text = (
+                f"📋 <b>WATCHLIST AUTO-UPDATE</b> — {now}\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"Tidak ada perubahan. {len(final)} pairs aktif."
+            )
+        else:
+            lines = [
+                f"🔄 <b>WATCHLIST DIPERBARUI</b> — {now}",
+                f"━━━━━━━━━━━━━━━━━━━━",
+            ]
+            if added:
+                coins = ', '.join(f"<code>{s.split('/')[0]}</code>" for s in added)
+                lines.append(f"✅ Masuk ({len(added)}) : {coins}")
+            if removed:
+                coins = ', '.join(f"<code>{s.split('/')[0]}</code>" for s in removed)
+                lines.append(f"❌ Keluar ({len(removed)}): {coins}")
+            lines.append(f"━━━━━━━━━━━━━━━━━━━━")
+            lines.append(f"📊 Total aktif : {len(final)} pairs")
+            text = '\n'.join(lines)
+
+        self.send_message(text)
