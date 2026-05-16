@@ -247,7 +247,7 @@ class TelegramNotifier:
         )
         self.send_message(text)
 
-    def notify_periodic_report(self, open_positions: list, balance: float):
+    def notify_periodic_report(self, open_positions: list, balance: float, reserve: float = 0.0):
         """
         Laporan berkala posisi aktif (06:00 / 12:00 / 18:00 / 23:59).
         Menampilkan detail setiap posisi beserta unrealized PnL.
@@ -262,7 +262,8 @@ class TelegramNotifier:
                 f"📋 <b>LAPORAN BERKALA</b> — {now}\n"
                 f"━━━━━━━━━━━━━━━━━━━━\n"
                 f"Tidak ada posisi aktif saat ini.\n"
-                f"💰 Balance: <code>${balance:.2f} USDT</code>"
+                f"💰 Balance : <code>${balance:.4f} USDT</code>\n"
+                f"🏦 Reserve : <code>${reserve:.4f} USDT</code>"
             )
             self.send_message(text)
             return
@@ -272,7 +273,8 @@ class TelegramNotifier:
 
         lines = [
             f"📋 <b>LAPORAN BERKALA</b> — {now}",
-            f"💰 Balance : <code>${balance:.2f} USDT</code>",
+            f"💰 Balance : <code>${balance:.4f} USDT</code>",
+            f"🏦 Reserve : <code>${reserve:.4f} USDT</code>",
             f"📊 Open    : {len(open_positions)} posisi",
             f"━━━━━━━━━━━━━━━━━━━━",
         ]

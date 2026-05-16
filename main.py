@@ -464,10 +464,15 @@ def monitor_positions(session: SessionReport = None, notifier: TelegramNotifier 
     _history_len_before = len(tracker.history)
     tracker.update_partial_tp(current_prices)
 
-    if notifier:
-        for rec in tracker.history[_history_len_before:]:
-            if rec.get('is_partial'):
+    # ⭐ Update balance dari partial TP (TP1 / TP2)
+    new_partials = [r for r in tracker.history[_history_len_before:] if r.get('is_partial')]
+    if new_partials:
+        balance_mgr.update_from_closed_positions(new_partials)
+        if notifier:
+            for rec in new_partials:
                 notifier.notify_partial_tp(rec)
+        if session:
+            session.record_closed(new_partials)
 
     tracker.update_breakeven_sl(current_prices)
     closed_positions = tracker.check_tp_sl(current_prices)
@@ -480,11 +485,6 @@ def monitor_positions(session: SessionReport = None, notifier: TelegramNotifier 
                 notifier.notify_position_closed(rec)
         if session:
             session.record_closed(closed_positions)
-
-    if session:
-        new_partials = [r for r in tracker.history[_history_len_before:] if r.get('is_partial')]
-        if new_partials:
-            session.record_closed(new_partials)
 
     tracker.save_positions()
 
@@ -543,11 +543,16 @@ def scan_market(session: SessionReport = None, notifier: TelegramNotifier = None
     _history_len_before = len(tracker.history)
     tracker.update_partial_tp(current_prices)
 
-    # ⭐ Notifikasi partial TP (TP1 / TP2) yang baru ter-trigger
-    if notifier:
-        for rec in tracker.history[_history_len_before:]:
-            if rec.get('is_partial'):
+    # ⭐ Update balance dari partial TP (TP1 / TP2) yang baru ter-trigger
+    new_partial_records = [r for r in tracker.history[_history_len_before:] if r.get('is_partial')]
+    if new_partial_records:
+        balance_mgr.update_from_closed_positions(new_partial_records)
+        account_balance = balance_mgr.get_balance()
+        if notifier:
+            for rec in new_partial_records:
                 notifier.notify_partial_tp(rec)
+        if session:
+            session.record_closed(new_partial_records)
 
     tracker.update_breakeven_sl(current_prices)
     closed_positions = tracker.check_tp_sl(current_prices)
@@ -555,7 +560,7 @@ def scan_market(session: SessionReport = None, notifier: TelegramNotifier = None
     # Log closed positions
     if closed_positions:
         BotLogger.log_closed_positions(closed_positions)
-        # ⭐ Update balance dari PnL posisi yang di-close
+        # ⭐ Update balance dari PnL posisi yang di-close (final close)
         balance_mgr.update_from_closed_positions(closed_positions)
         # Refresh balance untuk scan berikutnya
         account_balance = balance_mgr.get_balance()
@@ -567,13 +572,6 @@ def scan_market(session: SessionReport = None, notifier: TelegramNotifier = None
         if session:
             session.record_closed(closed_positions)
 
-    # ⭐ Catat partial TP records ke session report (TP1 & TP2 partial dari update_partial_tp)
-    if session:
-        new_partial_records = [r for r in tracker.history[_history_len_before:]
-                               if r.get('is_partial')]
-        if new_partial_records:
-            session.record_closed(new_partial_records)
-    
     # 6. ⭐ PRIORITAS 2: Cek Sinyal Baru (Hanya Jika Ada Slot)
     print("\n" + "="*70)
     print("🔍 CEK SINYAL BARU")
@@ -869,8 +867,8 @@ if __name__ == "__main__":
             if _current_hour in _REPORT_HOURS and _current_hour not in _reported_hours:
                 _pt      = PositionTracker()
                 _open    = [p for p in _pt.positions if p['status'] == 'OPEN']
-                _balance = BalanceManager().get_balance()
-                notifier.notify_periodic_report(_open, _balance)
+                _bm      = BalanceManager()
+                notifier.notify_periodic_report(_open, _bm.get_balance(), _bm.get_reserve())
                 _reported_hours.add(_current_hour)
             elif _current_hour not in _REPORT_HOURS:
                 _reported_hours.discard(_current_hour)
