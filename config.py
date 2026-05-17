@@ -80,7 +80,7 @@ RISK_CONFIG = {
     
     # ⭐ Guardrails aman untuk leverage 20x (liquidasi ~4.5-5% dari entry)
     'sl_min_pct': 0.010,               # Min SL 1% dari entry
-    'sl_max_pct': 0.030,               # Max SL 3% dari entry (aman, jauh dari liquidasi)
+    'sl_max_pct': 0.025,               # Max SL 3% dari entry (aman, jauh dari liquidasi)
     
     # ⭐ Risk:Reward lebih agresif
     'rr_ratio': 2,                   # Naik dari 2.0 → 2.5 (TP lebih jauh)
@@ -111,7 +111,7 @@ RISK_CONFIG = {
     'partial_tp_enabled': True,
     # TP1 hit → tutup 50% posisi, geser SL ke +10% margin profit (0.5% harga di leverage 20x)
     'tp1_partial_close_pct': 0.50,       # Tutup 50% saat TP1
-    'tp1_sl_profit_margin_pct': 0.10,    # SL baru = entry + (0.10 / leverage) → 10% margin profit
+    'tp1_sl_profit_margin_pct': 0.15,    # SL baru = entry + (0.10 / leverage) → 10% margin profit
     # TP2 hit → tutup semua sisa posisi
     # SL hit kapanpun → tutup semua sisa
 }
