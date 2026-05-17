@@ -17,6 +17,7 @@ TIMEFRAMES = {
 TRADING_CONFIG = {
     'leverage': 20,
     'max_position_size_pct': 2.5,      # Turun dari 4% → 2.5% (risk ~1.5% balance per trade)
+    'max_margin_pct': 2.5,             # Maksimal margin yang dipakai per posisi (% dari balance)
 
     # ⭐ ACCOUNT SETTINGS (Untuk Position Sizing)
     'account_balance_usdt': 66,  # ⚠️ ISI DENGAN BALANCE ANDA (Manual/Paper)

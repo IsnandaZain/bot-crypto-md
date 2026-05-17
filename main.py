@@ -440,16 +440,16 @@ if __name__ == "__main__":
                 _reported_hours.discard(_current_hour)
 
             # ── Watchlist auto-update jam 07:00 WIB (off-hours saja) ─────────
-            _today = datetime.now().date()
-            if (not _now_active
-                    and _current_hour == 8
-                    and _watchlist_updated_date != _today):
-                _wl_exch = ExchangeManager().connect()
-                if _wl_exch:
-                    _tracker    = PositionTracker()
-                    _open_pairs = {p['symbol'] for p in _tracker.positions if p['status'] == 'OPEN'}
-                    DataFetcher(_wl_exch).auto_update_watchlist(notifier, _open_pairs)
-                _watchlist_updated_date = _today
+            # _today = datetime.now().date()
+            # if (not _now_active
+            #         and _current_hour == 8
+            #         and _watchlist_updated_date != _today):
+            #     _wl_exch = ExchangeManager().connect()
+            #     if _wl_exch:
+            #         _tracker    = PositionTracker()
+            #         _open_pairs = {p['symbol'] for p in _tracker.positions if p['status'] == 'OPEN'}
+            #         DataFetcher(_wl_exch).auto_update_watchlist(notifier, _open_pairs)
+            #     _watchlist_updated_date = _today
 
             print(f"\n⏳ Menunggu {interval} detik...")
             time.sleep(interval)

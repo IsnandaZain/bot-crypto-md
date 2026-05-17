@@ -41,11 +41,14 @@ class PositionSizer:
         else:
             quantity = 0.0
 
-        # 4. Hitung Position Value dari quantity, lalu batasi dengan buying power
+        # 4. Hitung Position Value dari quantity, lalu batasi dengan buying power & margin cap
         position_value   = quantity * entry_price
         max_buying_power = self.balance * self.leverage
-        if position_value > max_buying_power:
-            position_value = max_buying_power
+        max_margin_usdt  = self.balance * (TRADING_CONFIG['max_margin_pct'] / 100)
+        max_by_margin    = max_margin_usdt * self.leverage
+        effective_cap    = min(max_buying_power, max_by_margin)
+        if position_value > effective_cap:
+            position_value = effective_cap
             quantity       = position_value / entry_price
 
         print(f"position_value : {position_value}")
